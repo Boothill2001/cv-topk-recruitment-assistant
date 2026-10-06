@@ -108,6 +108,9 @@ def init():
             c.execute("ALTER TABLE web_searches ADD COLUMN mode TEXT NOT NULL DEFAULT 'web'")
         from .people_storage import SQL as PEOPLE_SQL
         c.executescript(PEOPLE_SQL)
+        from .public_assessment import SQL as PUBLIC_SQL
+        c.executescript(PUBLIC_SQL)
+        c.execute("UPDATE public_assessments SET status='INTERRUPTED',error='Dịch vụ dừng giữa đánh giá; thử lại.' WHERE status='RUNNING'")
         c.execute("UPDATE web_searches SET status='INTERRUPTED',error='Dịch vụ dừng giữa lượt tìm web; kiểm tra lịch sử rồi thử lại.' WHERE status='RUNNING'")
         c.execute("UPDATE searches SET status='INTERRUPTED',error='Dịch vụ dừng giữa đánh giá; mở lượt tìm để tiếp tục.' WHERE status='RUNNING'")
 
@@ -121,6 +124,7 @@ def database_url():
     return configured
 
 def cancel_legacy():
+    execute("UPDATE public_assessments SET status='INTERRUPTED',error='Dịch vụ dừng giữa đánh giá; thử lại.' WHERE status='RUNNING'")
     execute("UPDATE web_searches SET status='INTERRUPTED',error='Dịch vụ dừng giữa lượt tìm web; kiểm tra lịch sử rồi thử lại.' WHERE status='RUNNING'")
     execute("UPDATE searches SET status='INTERRUPTED',error='Dịch vụ dừng giữa đánh giá; mở lượt tìm để tiếp tục.' WHERE status='RUNNING'")
     for t in rows("SELECT * FROM tasks WHERE status IN ('PENDING','RUNNING')"):

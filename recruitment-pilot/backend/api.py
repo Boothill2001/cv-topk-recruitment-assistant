@@ -416,6 +416,8 @@ from .exa_api import router as exa_router
 app.include_router(exa_router)
 from .people_api import router as people_router
 app.include_router(people_router)
+from .public_assessment_api import router as public_assessment_router
+app.include_router(public_assessment_router)
 
 FRONTEND=db.ROOT/'frontend'/'dist'
 @app.get('/assets/{asset_path:path}')

@@ -491,6 +491,9 @@ async def worker(sync_only=False):
                 await run(payload['search_id'])
                 state=db.one('SELECT status,error FROM web_searches WHERE id=?',(payload['search_id'],))
                 if state['status']=='FAILED':raise IntegrationError(state['error'])
+            elif task['kind']=='public_assessment':
+                from .public_assessment import assess
+                await assess(payload['assessment_id'])
             else:raise IntegrationError('Tác vụ không hợp lệ.')
             db.execute("UPDATE tasks SET status='COMPLETED',updated=? WHERE id=?",(db.now(),task['id']))
         except Exception as e:

@@ -61,7 +61,9 @@ Trong workspace JD: strategy + query → recruiter sửa/duyệt → chọn hư�
 
 Gom URL trùng giữ mọi strategy provenance; không gộp tên người. Cache 24h phân biệt query/mode/adapter; làm mới chủ động mới tạo request mới. Phí chỉ ghi theo provider; một lượt có phí chưa biết không được gọi là miễn phí. Một child lỗi không làm mất child thành công. Retry tối đa ba lần tổng. Query guard là hỗ trợ; không bảo đảm mọi free text đã được khử private data, recruiter phải review.
 
-Đây là nguồn hồ sơ công khai **chưa đánh giá phù hợp JD**; chưa tự import, judge, enrich hay liên hệ.
+Kết quả tìm là nguồn hồ sơ công khai **chưa đánh giá phù hợp JD**. Recruiter có thể chọn JD đã xác nhận và chủ động bấm đánh giá nhóm nguồn. Module `public_assessment` chụp JD/config/public excerpts, gửi một batch tới provider được chọn, kiểm tra IDs/evidence refs và tính điểm/coverage ở backend. UNKNOWN giữ riêng; đây là đánh giá sơ bộ từ đoạn trích, không phải CV hay danh tính đã xác minh. Không tự import, enrich hoặc liên hệ.
+
+Trang tìm web có upload JD PDF dẫn vào luồng xác nhận yêu cầu hiện có. Ô query cho soạn đến 30.000 ký tự, báo giới hạn 1.500 ký tự gửi tìm kiếm và không bị khóa khi lượt trước chạy. Dán nguyên JD thì dùng upload và rút gọn query; không tự cắt nội dung. Kết quả đánh giá lưu theo snapshot và tìm lại được khi mở cùng search/JD. Đổi số hiển thị không gọi AI lại. API `/api/v1/public-assessments` hỗ trợ tạo, đọc lịch sử, trạng thái và retry tối đa ba lần tổng. Budget model phải được xác nhận; không tự đổi provider hoặc chia calls.
 
 ## Bản đồ code (đường dẫn tính từ recruitment-pilot)
 
@@ -85,7 +87,7 @@ Gom URL trùng giữ mọi strategy provenance; không gộp tên người. Cach
 | backend/integrations.py, sheets.py | Drive/OAuth/text extraction và Sheet |
 | backend/people_search.py, exa_search.py | People groups và provider search |
 | backend/db.py, postgres.py | DB wrapper, config, init và restart recovery |
-| migrations/versions | 0001 structured, 0002 batch, 0003 Exa, 0004 People |
+| migrations/versions | 0001 structured, 0002 batch, 0003 Exa, 0004 People, 0005 public assessment |
 | tests | Dữ liệu giả, provider mock, regression theo module |
 
 Modular monolith từng bước: chưa refactor sạch toàn hệ thống. `engine.py`, `api.py`, `main.tsx` còn nhiều trách nhiệm; route cũ và mới cùng tồn tại. Không dạy rằng kiến trúc đã hoàn toàn decoupled hoặc RESTful chuẩn ở mọi endpoint.
