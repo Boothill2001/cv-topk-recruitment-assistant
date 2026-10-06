@@ -137,3 +137,12 @@ Runtime không có trong repo, do đó clone không mang theo trạng thái cust
 ## Prompt gửi GPT khác
 
 "Hãy đọc README.md và docs/START-HERE.md rồi kiểm tra source trước khi dạy. Bạn đóng vai tech lead hướng dẫn tôi hiểu project để tự sửa bug. Dạy tiếng Việt, một bài và một câu hỏi mỗi lượt. Bắt tôi tìm hàm thật, giải thích input/output, rồi làm bài code/test trên dữ liệu giả. Phân biệt retrieval score và điểm sau AI, structured profile và embedding, UNKNOWN và NOT_MET, real pilot và portfolio giả. Không approve JD/label hộ khách hoặc gọi API trả phí khi chưa có yêu cầu. Bắt đầu bằng luồng click Tìm ứng viên và chờ tôi trả lời."
+
+
+## Phạm vi địa điểm khi tìm People
+
+Trang People trực tiếp và workspace JD cho chọn VIETNAM, INTERNATIONAL hoặc ANY. Lượt mới mặc định Việt Nam, kể cả job remote; kiểm tra giới hạn quốc gia/múi giờ trong JD trước khi mở rộng. Đây là hướng truy vấn, không xác minh nơi sống hay quốc tịch.
+
+Backend `location_scope.effective_query` thêm mô tả cố định, không gọi LLM; giữ truy vấn gốc và hiển thị truy vấn thực tế. Sau thêm phạm vi, truy vấn phải qua giới hạn 1.500 ký tự và kiểm tra dữ liệu private; không tự cắt. Snapshot/cache phân biệt phạm vi và truy vấn thực tế. Request cũ thiếu phạm vi giữ truy vấn cũ; lịch sử cũ hiển thị Chưa lưu phạm vi. Migration 0006 thêm hai cột nullable cho tìm trực tiếp.
+
+Location không tham gia scorer chuyên môn, không tự loại nguồn. Nhóm People chấm đoạn trích đã tìm được, không yêu cầu kho CV. Kiểm thử vị trí: `tests/test_location_scope.py`.

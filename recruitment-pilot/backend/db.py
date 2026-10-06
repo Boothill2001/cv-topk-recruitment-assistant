@@ -107,6 +107,9 @@ def init():
         if 'mode' not in [r['name'] for r in c.execute('PRAGMA table_info(web_searches)').fetchall()]:
             c.execute("ALTER TABLE web_searches ADD COLUMN mode TEXT NOT NULL DEFAULT 'web'")
         from .people_storage import SQL as PEOPLE_SQL
+        for column in ('location_scope','effective_query'):
+            if column not in [r['name'] for r in c.execute('PRAGMA table_info(web_searches)').fetchall()]:
+                c.execute('ALTER TABLE web_searches ADD COLUMN '+column+' TEXT')
         c.executescript(PEOPLE_SQL)
         from .public_assessment import SQL as PUBLIC_SQL
         c.executescript(PUBLIC_SQL)

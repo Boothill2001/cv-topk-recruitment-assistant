@@ -2,14 +2,16 @@ from fastapi import APIRouter,HTTPException
 from pydantic import Field
 from . import people_search,engine,db
 from .models import Strict
+from .location_scope import Scope
 router=APIRouter(prefix='/api/v1',tags=['People retrieval'])
 class Selection(Strict):
     config_version:int
     strategy_ids:list[str]=Field(min_length=1,max_length=20)
     refresh:bool=False
+    location_scope:Scope|None=None
 class Version(Strict):config_version:int
 @router.post('/jobs/{job_id}/people-searches',status_code=202)
-def create(job_id:str,body:Selection):return people_search.create(job_id,body.config_version,body.strategy_ids,body.refresh)
+def create(job_id:str,body:Selection):return people_search.create(job_id,body.config_version,body.strategy_ids,body.refresh,body.location_scope)
 @router.get('/people-searches/{gid}')
 def detail(gid:str):
     try:return people_search.detail(gid)

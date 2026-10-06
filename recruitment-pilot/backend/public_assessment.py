@@ -81,7 +81,8 @@ def create(job_id,version,search_id):
                         'evidence':{'E'+str(k+1):h for k,h in enumerate(snippets)}})
     snap={'job_revision':jp['revision'],'public_jd':public,'config':config,'criteria':criteria,'sources':records,
           'provider':db.setting('provider','deepseek'),'model':db.setting('model','deepseek-flash'),
-          'search_id':search_id,'retrieved_at':search.get('retrieved_at'),'version':VERSION}
+          'search_id':search_id,'retrieved_at':search.get('retrieved_at'),'version':VERSION,
+          'location_scope':search.get('location_scope',search.get('snapshot',{}).get('location_scope'))}
     preflight(snap)
     fingerprint=engine.digest(db.dumps(snap))
     with db.LOCK,db.conn() as conn:

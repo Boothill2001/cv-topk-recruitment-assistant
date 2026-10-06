@@ -8,10 +8,11 @@ from .models import ExaQueries
 def public_sources(job_id):
     return [s for s in engine.sources(job_id,'job') if s['group']=='job_public']
 
-def validate_query(query,job_id):
+def validate_query(query,job_id=None):
     if not 3<=len(query.strip())<=1500:raise IntegrationError('Truy vấn Exa cần từ 3 đến 1.500 ký tự.')
     if re.search(r'\S+@\S+|(?:\+?\d[\s().-]*){8,}|(?:\$|USD|VND|salary|budget|lương|ngân sách)',query,re.I):
         raise IntegrationError('Truy vấn Exa không được chứa liên hệ, lương hoặc ngân sách.')
+    if job_id is None:return
     words=lambda s:re.findall(r'\w+',s.lower())
     query_text=' '.join(words(query));public=' '.join(words(' '.join(s['text'] for s in public_sources(job_id))))
     for source in engine.sources(job_id,'job'):
@@ -44,7 +45,7 @@ async def draft_queries(job_id,version):
         engine.invalidate('job',job_id,False)
 
 @engine.serialized
-def create(job_id,version,ids,refresh=False):
+def create(job_id,version,ids,refresh=False,location_scope=None):
     c,p=engine.checked_config(job_id,version);data=json.loads(c['data'])
     if not c['approved'] or not c['criteria_approved'] or c['strategy_hash']!=engine.criteria_hash(data):
         raise IntegrationError('Lưu và duyệt hướng tìm kiếm trước khi gửi Exa.')
@@ -54,9 +55,11 @@ def create(job_id,version,ids,refresh=False):
         s=strategies.get(sid)
         if not s or not s['enabled']:raise IntegrationError('Strategy không tồn tại hoặc đã tắt.')
         validate_query(s.get('exa_query',''),job_id)
-    chosen=[strategies[sid] for sid in sorted(ids)]
+    from .location_scope import effective_query
+    chosen=[{**strategies[sid],'effective_query':effective_query(strategies[sid]['exa_query'],location_scope)} for sid in sorted(ids)]
+    for s in chosen:validate_query(s['effective_query'],job_id)
     snapshot={'job_id':job_id,'job_revision':p['revision'],'job':json.loads(p['data']),
-        'config_version':version,'config':data,'strategies':chosen,'adapter_version':exa_search.VERSION}
+        'config_version':version,'config':data,'strategies':chosen,'location_scope':location_scope,'adapter_version':exa_search.VERSION}
     fingerprint=engine.digest(db.dumps(snapshot));cutoff=(datetime.now(timezone.utc)-timedelta(hours=24)).isoformat()
     with db.LOCK,db.conn() as conn:
         old=conn.execute('SELECT id FROM people_searches WHERE fingerprint=? AND created>=? ORDER BY created DESC LIMIT 1',(fingerprint,cutoff)).fetchone()
@@ -64,7 +67,7 @@ def create(job_id,version,ids,refresh=False):
         gid=str(uuid.uuid4())
         conn.execute('INSERT INTO people_searches VALUES(?,?,?,?,?)',(gid,job_id,fingerprint,db.dumps(snapshot),db.now()))
         for s in chosen:
-            sid=exa_search.ensure_search(conn,s['exa_query'],refresh,'people')
+            sid=exa_search.ensure_search(conn,s['exa_query'],refresh,'people',location_scope)
             conn.execute('INSERT INTO people_search_items VALUES(?,?,?)',(gid,s['id'],sid))
     return detail(gid)
 

@@ -3,21 +3,23 @@ from typing import Literal
 from pydantic import Field
 from .models import Strict
 from . import db,exa_search
+from .location_scope import Scope
 
 router=APIRouter(prefix='/api/v1/web-searches',tags=['Exa web search'])
 class SearchBody(Strict):
     query:str=Field(min_length=3,max_length=1500)
     refresh:bool=False
     mode:Literal['web','people']='web'
+    location_scope:Scope|None=None
 
 @router.get('/connection')
 def connection():return {'provider':'exa','configured':exa_search.configured(),'endpoint':'search','default_results':10}
 
 @router.get('')
-def history():return db.rows('SELECT id,query,mode,status,attempts,error,created,updated FROM web_searches ORDER BY created DESC LIMIT 30')
+def history():return db.rows('SELECT id,query,mode,location_scope,effective_query,status,attempts,error,created,updated FROM web_searches ORDER BY created DESC LIMIT 30')
 
 @router.post('',status_code=202)
-def create(body:SearchBody):return exa_search.create(body.query,body.refresh,body.mode)
+def create(body:SearchBody):return exa_search.create(body.query,body.refresh,body.mode,body.location_scope)
 
 @router.get('/{sid}')
 def detail(sid:str):
