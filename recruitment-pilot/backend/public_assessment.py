@@ -56,7 +56,7 @@ def preflight(snap):
     return output
 
 @engine.serialized
-def create(job_id,version,search_id):
+def create(job_id,version,search_id,source_urls=None,preview=False):
     c,jp=engine.checked_config(job_id,version)
     if not c['criteria_approved']:raise IntegrationError('Xác nhận yêu cầu của JD trước khi đánh giá nguồn công khai.')
     try:search=exa_search.detail(search_id)
@@ -69,7 +69,11 @@ def create(job_id,version,search_id):
     if search['mode']!='people' or search['status'] not in ('COMPLETED','PARTIAL'):raise IntegrationError('Chỉ đánh giá lượt People đã hoàn tất; không chấm khi đang tìm.')
     sources=search.get('results',[])
     if not sources:raise IntegrationError('Lượt tìm chưa có nguồn hồ sơ để đánh giá.')
-    if len(sources)>20:raise IntegrationError('Pilot đánh giá tối đa 20 nguồn trong một nhóm.')
+    if source_urls is not None:
+        if not source_urls or len(source_urls)!=len(set(source_urls)) or not set(source_urls)<=set(s['url'] for s in sources):
+            raise IntegrationError('Chọn nguồn hợp lệ, không gửi link trùng hoặc ngoài lượt tìm.')
+        sources=[s for s in sources if s['url'] in source_urls]
+    if len(sources)>20 and not preview:raise IntegrationError('Chọn tối đa 20 nguồn để chấm; các nguồn còn lại vẫn được giữ trong kết quả tìm.')
     config=json.loads(c['data']);criteria=[x for x in config['criteria'] if x['enabled']]
     if not criteria:raise IntegrationError('JD chưa có tiêu chí đang bật.')
     # Keep only public JD text. Private notes are not copied into this new workflow.
@@ -83,6 +87,13 @@ def create(job_id,version,search_id):
           'provider':db.setting('provider','deepseek'),'model':db.setting('model','deepseek-flash'),
           'search_id':search_id,'retrieved_at':search.get('retrieved_at'),'version':VERSION,
           'location_scope':search.get('location_scope',search.get('snapshot',{}).get('location_scope'))}
+    if preview:
+        for size in range(min(20,len(records)),0,-1):
+            try:
+                preflight({**snap,'sources':records[:size]})
+                return {'max_sources':size,'source_count':len(records),'criteria_count':len(criteria),'default_sources':min(10,size),'note':'Giới hạn dựa trên budget và đoạn trích; backend kiểm tra lại nhóm bạn chọn.'}
+            except IntegrationError:pass
+        raise IntegrationError('Không có nhóm nguồn nào vừa budget hiện tại. Kiểm tra model/budget hoặc tiêu chí trước khi chấm.')
     preflight(snap)
     fingerprint=engine.digest(db.dumps(snap))
     with db.LOCK,db.conn() as conn:

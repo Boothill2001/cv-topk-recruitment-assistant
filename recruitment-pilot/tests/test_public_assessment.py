@@ -84,3 +84,27 @@ def test_people_group_works_without_candidate_pool(fake_ai,monkeypatch):
     assert service.create('IT-1',version,'GROUP')['id']==row['id']
     group['is_current']=False
     with pytest.raises(IntegrationError):service.create('IT-1',version,'OTHER')
+
+
+def test_explicit_source_selection_over_twenty(fake_ai):
+    version=setup(fake_ai)
+    sources=[{'title':str(i),'url':'https://example.com/'+str(i),'highlights':['Python engineer']} for i in range(24)]
+    db.execute('UPDATE web_searches SET response=? WHERE id=?',(db.dumps({'results':sources}),'S'))
+    with pytest.raises(IntegrationError):service.create('IT-1',version,'S')
+    urls=[s['url'] for s in sources[:20]]
+    result=service.create('IT-1',version,'S',urls)
+    assert result['source_count']==20
+    assert service.create('IT-1',version,'S',urls)['id']==result['id']
+    snap=json.loads(db.one('SELECT snapshot FROM public_assessments')['snapshot'])
+    assert [s['url'] for s in snap['sources']]==urls
+    assert len(json.loads(db.one('SELECT response FROM web_searches')['response'])['results'])==24
+    for invalid in ([],[urls[0],urls[0]],['https://example.com/unknown']):
+        with pytest.raises(IntegrationError):service.create('IT-1',version,'S',invalid)
+
+
+def test_preview_no_task_or_ai(fake_ai):
+    version=setup(fake_ai);count=len(fake_ai);tasks=len(db.rows('SELECT id FROM tasks'))
+    p=service.create('IT-1',version,'S',preview=True)
+    assert p['max_sources']==1 and p['default_sources']==1
+    assert len(fake_ai)==count and len(db.rows('SELECT id FROM tasks'))==tasks
+    assert not db.rows('SELECT id FROM public_assessments')

@@ -146,3 +146,10 @@ Trang People trực tiếp và workspace JD cho chọn VIETNAM, INTERNATIONAL ho
 Backend `location_scope.effective_query` thêm mô tả cố định, không gọi LLM; giữ truy vấn gốc và hiển thị truy vấn thực tế. Sau thêm phạm vi, truy vấn phải qua giới hạn 1.500 ký tự và kiểm tra dữ liệu private; không tự cắt. Snapshot/cache phân biệt phạm vi và truy vấn thực tế. Request cũ thiếu phạm vi giữ truy vấn cũ; lịch sử cũ hiển thị Chưa lưu phạm vi. Migration 0006 thêm hai cột nullable cho tìm trực tiếp.
 
 Location không tham gia scorer chuyên môn, không tự loại nguồn. Nhóm People chấm đoạn trích đã tìm được, không yêu cầu kho CV. Kiểm thử vị trí: `tests/test_location_scope.py`.
+
+
+## Chọn nguồn trước khi chấm web
+
+Một nhóm People có thể trả hơn 20 nguồn khi chạy nhiều strategies. UI giữ tất cả nguồn, cho tick nhóm riêng để chấm và mặc định chọn tối đa 10 theo thứ tự nguồn tìm được (không coi là thứ hạng phù hợp). GET /api/v1/public-assessment-preview kiểm tra budget không gọi AI/không tạo task; giới hạn còn tùy số tiêu chí và độ dài đoạn trích. POST public-assessments có source_urls tùy chọn; backend từ chối link ngoài nhóm, trùng, rỗng hoặc quá budget, lưu đúng nguồn vào snapshot. Request cũ không có source_urls giữ cách chấm cả nhóm và từ chối khi quá 20.
+
+Kiểm chứng 5 JD ngày 06/10/2026 chạy PostgreSQL QA riêng, People thật và LLM thật. Lượt cuối chấm 9 nguồn/JD thành công; trước đó có lỗi budget/kết nối/timeout/JSON được ghi audit, không coi là 5 lượt đầu đều pass. Kết quả và audit cục bộ nằm trong runtime/verification, không đưa vào Git vì chứa thông tin hồ sơ. Đây là kiểm chứng kỹ thuật, chưa phải benchmark nhãn khách.
