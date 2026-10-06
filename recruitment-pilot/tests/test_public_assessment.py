@@ -71,3 +71,16 @@ def test_unverified_model_budget_blocks_before_queue(fake_ai):
     version=setup(fake_ai);db.set_setting('model','unverified-model')
     with pytest.raises(IntegrationError):service.create('IT-1',version,'S')
     assert not db.rows('SELECT id FROM public_assessments')
+
+def test_people_group_works_without_candidate_pool(fake_ai,monkeypatch):
+    version=setup(fake_ai)
+    from backend import people_search
+    group={'job_id':'IT-1','is_current':True,'status':'COMPLETED','results':[
+        {'title':'Synthetic public source','url':'https://example.com/person','highlights':['Worked with Python']}]}
+    monkeypatch.setattr(people_search,'detail',lambda id:group)
+    assert not db.rows("SELECT id FROM profiles WHERE kind='candidate'")
+    row=service.create('IT-1',version,'GROUP')
+    assert row['source_count']==1 and row['status']=='PENDING'
+    assert service.create('IT-1',version,'GROUP')['id']==row['id']
+    group['is_current']=False
+    with pytest.raises(IntegrationError):service.create('IT-1',version,'OTHER')

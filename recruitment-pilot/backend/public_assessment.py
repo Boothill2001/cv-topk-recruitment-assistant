@@ -59,8 +59,14 @@ def preflight(snap):
 def create(job_id,version,search_id):
     c,jp=engine.checked_config(job_id,version)
     if not c['criteria_approved']:raise IntegrationError('Xác nhận yêu cầu của JD trước khi đánh giá nguồn công khai.')
-    search=exa_search.detail(search_id)
-    if search['mode']!='people' or search['status']!='COMPLETED':raise IntegrationError('Chỉ đánh giá lượt People đã hoàn tất.')
+    try:search=exa_search.detail(search_id)
+    except KeyError:
+        from . import people_search
+        search=people_search.detail(search_id)
+        if search['job_id']!=job_id or not search['is_current']:
+            raise IntegrationError('Nhóm tìm thuộc JD khác hoặc yêu cầu cũ; tìm lại theo JD hiện tại.')
+        search={**search,'mode':'people'}
+    if search['mode']!='people' or search['status'] not in ('COMPLETED','PARTIAL'):raise IntegrationError('Chỉ đánh giá lượt People đã hoàn tất; không chấm khi đang tìm.')
     sources=search.get('results',[])
     if not sources:raise IntegrationError('Lượt tìm chưa có nguồn hồ sơ để đánh giá.')
     if len(sources)>20:raise IntegrationError('Pilot đánh giá tối đa 20 nguồn trong một nhóm.')

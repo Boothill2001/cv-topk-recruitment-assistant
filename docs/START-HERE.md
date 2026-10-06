@@ -65,6 +65,8 @@ Kết quả tìm là nguồn hồ sơ công khai **chưa đánh giá phù hợp 
 
 Trang tìm web có upload JD PDF dẫn vào luồng xác nhận yêu cầu hiện có. Ô query cho soạn đến 30.000 ký tự, báo giới hạn 1.500 ký tự gửi tìm kiếm và không bị khóa khi lượt trước chạy. Dán nguyên JD thì dùng upload và rút gọn query; không tự cắt nội dung. Kết quả đánh giá lưu theo snapshot và tìm lại được khi mở cùng search/JD. Đổi số hiển thị không gọi AI lại. API `/api/v1/public-assessments` hỗ trợ tạo, đọc lịch sử, trạng thái và retry tối đa ba lần tổng. Budget model phải được xác nhận; không tự đổi provider hoặc chia calls.
 
+Upload/mở JD từ trang tìm web giữ `jobMode=web`: xác nhận criteria → sinh và duyệt strategies/query → chọn strategy → tìm People. Không mở upload CV hay gọi retrieval candidate pool trong luồng này; kho CV trống không chặn tìm web. Sau khi nhóm People hoàn tất, có thể chấm các nguồn theo JD hiện tại ngay trong workspace. Các nhóm trên 20 nguồn phải giảm phạm vi trước khi chấm batch; không âm thầm bỏ người. Luồng tìm trong kho CV vẫn riêng.
+
 ## Bản đồ code (đường dẫn tính từ recruitment-pilot)
 
 | File | Nắm gì |

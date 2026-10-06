@@ -1,8 +1,8 @@
 import React,{useEffect,useState} from 'react';
 import {request} from './request';
 const names:Record<string,string>={MET:'Đáp ứng',PARTIAL:'Một phần',NOT_MET:'Có bằng chứng không đáp ứng',UNKNOWN:'Chưa đủ thông tin'};
-export default function PublicAssessment({searchId,jobs,onJob}:{searchId:string;jobs:any[];onJob:(id:string)=>void}){
- const [job,setJob]=useState(''),[config,setConfig]=useState<any>(null),[report,setReport]=useState<any>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[limit,setLimit]=useState(10);
+export default function PublicAssessment({searchId,jobs,onJob,initialJob=''}:{searchId:string;jobs:any[];onJob:(id:string)=>void;initialJob?:string}){
+ const [job,setJob]=useState(initialJob),[config,setConfig]=useState<any>(null),[report,setReport]=useState<any>(null),[busy,setBusy]=useState(false),[error,setError]=useState(''),[limit,setLimit]=useState(10);
  useEffect(()=>{setConfig(null);setReport(null);setError('');if(!job)return;let active=true;Promise.all([request<any>('/jobs/'+job+'/config'),request<any[]>('/v1/public-assessments?job_id='+encodeURIComponent(job)+'&search_id='+encodeURIComponent(searchId))]).then(([v,history])=>{if(active){setConfig(v);setReport(history[0]||null)}}).catch(e=>{if(active)setError(e.message)});return()=>{active=false}},[job,searchId]);
  useEffect(()=>{if(report?.results?.length)setLimit(n=>Math.min(n,report.results.length))},[report?.id,report?.results?.length]);
  const working=report&&['PENDING','RUNNING'].includes(report.status);
