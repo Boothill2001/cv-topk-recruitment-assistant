@@ -1,0 +1,7 @@
+# Copy to runtime/customer-api.env, then fill ONLY the providers you use.
+# Do not put real keys in frontend, Git or chat. Never share this filled file.
+DEEPSEEK_API_KEY=
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
+GEMINI_API_KEY=
+EXA_API_KEY=
