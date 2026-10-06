@@ -123,3 +123,16 @@ def test_local_api_csrf_and_no_secret():
     assert c.post('/api/bootstrap',headers={'X-Pilot-Request':'1','Origin':'https://evil.example'}).status_code==403
     status=c.get('/api/status').json()
     assert 'DEEPSEEK_API_KEY' not in json.dumps(status)
+
+
+@pytest.mark.parametrize('text',['Tạo động lực cho đội ngũ','Kỹ năng lãnh đạo, quản lý đội ngũ, tạo động lực','Motivating employees','Motivate team'])
+def test_team_motivation_is_professional(text):
+    import copy
+    config=copy.deepcopy(CONFIG);config['criteria'][0]['name']=text;config['criteria'][0]['description']=text
+    engine.validate_config(config,False)
+
+@pytest.mark.parametrize('text',['Động lực chuyển việc của ứng viên','Candidate motivation to change jobs','Tạo động lực cho đội ngũ; salary expectation','Motivating employees; nationality'])
+def test_personal_motivation_stays_excluded(text):
+    import copy
+    config=copy.deepcopy(CONFIG);config['criteria'][0]['name']=text
+    with pytest.raises(IntegrationError):engine.validate_config(config,False)

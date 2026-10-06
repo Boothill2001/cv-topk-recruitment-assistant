@@ -249,8 +249,16 @@ def validate_config(config,require_strategies=True):
             try:retrieval.validate_rule(s['rule'])
             except ValueError as e:raise IntegrationError(str(e))
     banned=r'(?i)(\bsalary\b|lương|\bremote\b|\brelocat\w*|giới tính|\bgender\b|\breligion\b|tôn giáo|\brace\b|chủng tộc|\btuổi\b|\bage\b|\bdisability\b|khuyết tật|\bsexual\b|\bnationality\b|quốc tịch|\bmotivat\w*|động lực)'
-    if any(re.search(banned,c['name']+' '+c['description']) for c in config['criteria']):
-        raise IntegrationError('Criteria chỉ dùng năng lực chuyên môn, không salary/remote/động lực/thuộc tính nhạy cảm.')
+    for criterion in config['criteria']:
+        text=criterion['name']+' '+criterion['description']
+        # Team motivation is a leadership skill, distinct from a candidate's desire to move.
+        professional=r'(?i)(?:tạo động lực(?:\s+cho)?\s+(?:đội ngũ|nhân viên|nhân sự)|(?:quản lý|lãnh đạo)\s+đội ngũ\s*[,;và ]+\s*tạo động lực|motivat(?:e|ing|ion)(?:\s+of|\s+for)?\s+(?:teams?|employees|staff))'
+        checked=re.sub(professional,'leadership skill',text)
+        match=re.search(banned,checked)
+        if match:
+            error=IntegrationError('Tiêu chí '+criterion['id']+' chứa nội dung ngoài năng lực chuyên môn: '+match.group(0)+'. Tách điều kiện cá nhân khỏi criteria.')
+            error.feedback={'criterion_id':criterion['id'],'matched_term':match.group(0),'instruction':'Only professional competencies. Motivating a team is leadership; a candidate desire to change jobs is not a scoring criterion.'}
+            raise error
 
 async def propose(job_id):
     p=db.one("SELECT * FROM profiles WHERE id=? AND kind='job' AND status='READY'",(job_id,))
