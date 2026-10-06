@@ -18,4 +18,3 @@ export default function PublicAssessment({searchId,jobs,onJob}:{searchId:string;
  </>}
  </div>;
 }
-
