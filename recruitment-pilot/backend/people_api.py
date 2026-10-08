@@ -1,3 +1,4 @@
+from typing import Literal
 from fastapi import APIRouter,HTTPException
 from pydantic import Field
 from . import people_search,engine,db
@@ -9,9 +10,12 @@ class Selection(Strict):
     strategy_ids:list[str]=Field(min_length=1,max_length=20)
     refresh:bool=False
     location_scope:Scope|None=None
-class Version(Strict):config_version:int
+    search_type:Literal['auto','deep']='auto'
+class Version(Strict):
+    config_version:int
+    guidance_version:int|None=Field(default=None,ge=0)
 @router.post('/jobs/{job_id}/people-searches',status_code=202)
-def create(job_id:str,body:Selection):return people_search.create(job_id,body.config_version,body.strategy_ids,body.refresh,body.location_scope)
+def create(job_id:str,body:Selection):return people_search.create(job_id,body.config_version,body.strategy_ids,body.refresh,body.location_scope,body.search_type)
 @router.get('/people-searches/{gid}')
 def detail(gid:str):
     try:return people_search.detail(gid)
@@ -21,4 +25,8 @@ def history(job_id:str):return db.rows('SELECT id,job_id,created FROM people_sea
 @router.post('/jobs/{job_id}/exa-queries',status_code=202)
 def draft(job_id:str,body:Version):
     engine.checked_config(job_id,body.config_version)
-    return {'task_id':engine.enqueue('exa_queries',{'job_id':job_id,'version':body.config_version})}
+    from .scouting_guidance import capture
+    with db.LOCK:
+        engine.checked_config(job_id,body.config_version)
+        guidance=capture(job_id,body.guidance_version,'exa_queries')
+        return {'task_id':engine.enqueue('exa_queries',{'job_id':job_id,'version':body.config_version,'guidance':guidance})}

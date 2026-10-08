@@ -8,7 +8,7 @@ from . import db,engine
 from .errors import IntegrationError
 
 API='https://api.exa.ai/search'
-VERSION='exa-highlights-v3-location'
+VERSION='exa-highlights-v4-search-type'
 SEMAPHORE=asyncio.Semaphore(1)
 
 def api_key():
@@ -51,8 +51,9 @@ def reported_cost(raw):
     if isinstance(value,(int,float)) and not isinstance(value,bool) and math.isfinite(value) and value>=0:return float(value)
     return None
 
-def ensure_search(conn,query,refresh=False,mode='web',location_scope=None):
+def ensure_search(conn,query,refresh=False,mode='web',location_scope=None,search_type='auto'):
     api_key();query=query.strip()
+    if search_type not in ('auto','deep'):raise IntegrationError('Chọn chế độ tìm kiếm Auto hoặc Deep.')
     if mode not in ('web','people'):raise IntegrationError('Chế độ Exa không hợp lệ.')
     if not 3<=len(query)<=1500:raise IntegrationError('Nhập nội dung tìm kiếm từ 3 đến 1.500 ký tự.')
     from .location_scope import effective_query
@@ -60,18 +61,18 @@ def ensure_search(conn,query,refresh=False,mode='web',location_scope=None):
     if location_scope is not None:
         from .people_search import validate_query
         validate_query(effective)
-    fingerprint=engine.digest(db.dumps({'query':query,'effective_query':effective,'location_scope':location_scope,'mode':mode,'adapter':VERSION}))
+    fingerprint=engine.digest(db.dumps({'query':query,'effective_query':effective,'location_scope':location_scope,'mode':mode,'search_type':search_type,'adapter':VERSION}))
     cutoff=(datetime.now(timezone.utc)-timedelta(hours=24)).isoformat()
     old=conn.execute("SELECT * FROM web_searches WHERE fingerprint=? AND (status IN ('PENDING','RUNNING') OR (status='COMPLETED' AND created>=?)) ORDER BY created DESC LIMIT 1",(fingerprint,cutoff)).fetchone()
     if old and (not refresh or old['status'] in ('PENDING','RUNNING')):return old['id']
     sid=str(uuid.uuid4());now=db.now()
-    conn.execute('INSERT INTO web_searches(id,fingerprint,query,status,created,updated,mode,location_scope,effective_query) VALUES(?,?,?,?,?,?,?,?,?)',(sid,fingerprint,query,'PENDING',now,now,mode,location_scope,effective))
+    conn.execute('INSERT INTO web_searches(id,fingerprint,query,status,created,updated,mode,location_scope,effective_query,search_type) VALUES(?,?,?,?,?,?,?,?,?,?)',(sid,fingerprint,query,'PENDING',now,now,mode,location_scope,effective,search_type))
     conn.execute('INSERT INTO tasks(kind,payload,status,created,updated) VALUES(?,?,?,?,?)',('web_search',db.dumps({'search_id':sid}),'PENDING',now,now))
     return sid
 
 @engine.serialized
-def create(query,refresh=False,mode='web',location_scope=None):
-    with db.LOCK,db.conn() as conn:sid=ensure_search(conn,query,refresh,mode,location_scope)
+def create(query,refresh=False,mode='web',location_scope=None,search_type='auto'):
+    with db.LOCK,db.conn() as conn:sid=ensure_search(conn,query,refresh,mode,location_scope,search_type)
     return detail(sid)
 
 def detail(sid):
@@ -110,7 +111,7 @@ async def run(sid):
             try:
                 async with httpx.AsyncClient(timeout=httpx.Timeout(60,connect=15)) as c:
                     # Canonical skill defaults: no inferred category, domains, dates or extra synthesis.
-                    payload={'query':s.get('effective_query') or s['query'],'type':'auto','contents':{'highlights':True}}
+                    payload={'query':s.get('effective_query') or s['query'],'type':s['search_type'],'contents':{'highlights':True}}
                     if s['mode']=='people':payload['category']='people'
                     r=await c.post(API,headers={'x-api-key':key},json=payload)
                     r.raise_for_status();raw=r.json()

@@ -29,6 +29,8 @@ def init():
         from .postgres import initialize
         initialize(database_url(),ROOT)
         cancel_legacy()
+        from .assessment_groups import recover
+        recover()
         return
     with LOCK, conn() as c:
         c.executescript('''
@@ -106,6 +108,8 @@ def init():
         c.executescript(EXA_SQL)
         if 'mode' not in [r['name'] for r in c.execute('PRAGMA table_info(web_searches)').fetchall()]:
             c.execute("ALTER TABLE web_searches ADD COLUMN mode TEXT NOT NULL DEFAULT 'web'")
+        if 'search_type' not in [r['name'] for r in c.execute('PRAGMA table_info(web_searches)').fetchall()]:
+            c.execute("ALTER TABLE web_searches ADD COLUMN search_type TEXT NOT NULL DEFAULT 'auto' CHECK (search_type IN ('auto','deep'))")
         from .people_storage import SQL as PEOPLE_SQL
         for column in ('location_scope','effective_query'):
             if column not in [r['name'] for r in c.execute('PRAGMA table_info(web_searches)').fetchall()]:
@@ -113,9 +117,18 @@ def init():
         c.executescript(PEOPLE_SQL)
         from .public_assessment import SQL as PUBLIC_SQL
         c.executescript(PUBLIC_SQL)
+        from .content_fetch import SQL as CONTENT_SQL
+        c.executescript(CONTENT_SQL)
+        from .assessment_groups import SQL as GROUP_SQL
+        c.executescript(GROUP_SQL)
+        from .scouting_guidance import SQL as GUIDANCE_SQL
+        c.executescript(GUIDANCE_SQL)
+        c.execute("UPDATE content_fetches SET status='INTERRUPTED' WHERE status='RUNNING'")
         c.execute("UPDATE public_assessments SET status='INTERRUPTED',error='Dịch vụ dừng giữa đánh giá; thử lại.' WHERE status='RUNNING'")
         c.execute("UPDATE web_searches SET status='INTERRUPTED',error='Dịch vụ dừng giữa lượt tìm web; kiểm tra lịch sử rồi thử lại.' WHERE status='RUNNING'")
         c.execute("UPDATE searches SET status='INTERRUPTED',error='Dịch vụ dừng giữa đánh giá; mở lượt tìm để tiếp tục.' WHERE status='RUNNING'")
+        c.execute("UPDATE assessment_groups SET status='PENDING' WHERE status IN ('RUNNING','INTERRUPTED')")
+        c.execute("UPDATE tasks SET status='PENDING',error=NULL WHERE kind='assessment_group' AND status='INTERRUPTED'")
 
 def database_url():
     # Tests use an explicitly isolated runtime and never connect to customer storage.
@@ -127,6 +140,7 @@ def database_url():
     return configured
 
 def cancel_legacy():
+    execute("UPDATE content_fetches SET status='INTERRUPTED' WHERE status='RUNNING'")
     execute("UPDATE public_assessments SET status='INTERRUPTED',error='Dịch vụ dừng giữa đánh giá; thử lại.' WHERE status='RUNNING'")
     execute("UPDATE web_searches SET status='INTERRUPTED',error='Dịch vụ dừng giữa lượt tìm web; kiểm tra lịch sử rồi thử lại.' WHERE status='RUNNING'")
     execute("UPDATE searches SET status='INTERRUPTED',error='Dịch vụ dừng giữa đánh giá; mở lượt tìm để tiếp tục.' WHERE status='RUNNING'")

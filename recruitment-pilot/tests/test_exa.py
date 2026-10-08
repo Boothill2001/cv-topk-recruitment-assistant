@@ -31,6 +31,20 @@ PAYLOAD={'requestId':'req-1','costDollars':{'total':0.007},'results':[
     {'title':'Duplicate','url':'https://example.com/page#section'},
     {'title':'Unsafe','url':'javascript:alert(1)'}]}
 
+def test_search_type_payload_cache_retry_and_restart(monkeypatch):
+    calls=mock_api(monkeypatch,[(503,{}),(200,PAYLOAD)])
+    auto=exa.create('Public developer query',mode='people')
+    deep=exa.create('Public developer query',mode='people',search_type='deep')
+    assert auto['id']!=deep['id']
+    assert exa.create('Public developer query',mode='people',search_type='deep')['id']==deep['id']
+    db.init()
+    asyncio.run(exa.run(deep['id']))
+    assert len(calls)==2
+    assert all(c[1]['json']['type']=='deep' and c[1]['json']['category']=='people' for c in calls)
+    assert exa.detail(deep['id'])['search_type']=='deep'
+    assert exa.detail(auto['id'])['search_type']=='auto'
+    with pytest.raises(IntegrationError):exa.create('Public developer query',search_type='invalid')
+
 def test_minimal_request_cache_and_refresh(monkeypatch):
     calls=mock_api(monkeypatch,[(200,PAYLOAD)])
     first=exa.create('Public search query')

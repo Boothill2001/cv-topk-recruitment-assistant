@@ -286,7 +286,7 @@ def checked_config(job_id,version):
         raise IntegrationError('JD/config đã đổi hoặc chưa hợp lệ. Tải lại.')
     return c,p
 
-async def generate_strategies(job_id,version,count):
+async def generate_strategies(job_id,version,count,guidance=None):
     config,p=checked_config(job_id,version)
     if not config['criteria_approved']:raise IntegrationError('Duyệt criteria trước khi sinh strategy.')
     data=json.loads(config['data']);validate_config(data,False)
@@ -295,12 +295,23 @@ async def generate_strategies(job_id,version,count):
         validate_config({**data,'strategies':plan['strategies']})
         from .people_search import validate_query
         for strategy in plan['strategies']:validate_query(strategy.get('exa_query',''),job_id)
+        from .people_search import must_block
+        must_block({**data,'public_musts':plan['public_musts']},job_id)
+        from .people_search import composed_query
+        for strategy in plan['strategies']:
+            for scope in ('VIETNAM','INTERNATIONAL','ANY'):composed_query({**data,'public_musts':plan['public_musts']},strategy,scope,job_id)
     result=await ai('strategies',{'criteria':data['criteria'],'strategy_count':count,
-        'job':{'profile':json.loads(p['data']),'sources':sources(job_id,'job')},'public_jd':[s for s in sources(job_id,'job') if s['group']=='job_public']},StrategyPlan,validate)
+        **({'recruiter_guidance':guidance['content']} if guidance else {}),
+        'job':{'profile':json.loads(p['data']),'sources':sources(job_id,'job')},'public_jd':[s for s in sources(job_id,'job') if s['group']=='job_public']},StrategyPlan,validate,
+        **({'prompt_override':guidance['prompt']} if guidance else {}))
     with db.LOCK:
         fresh,_=checked_config(job_id,version)
         if not fresh['criteria_approved']:raise IntegrationError('Criteria cần duyệt lại; không ghi strategy cũ.')
         data['strategies']=result['strategies']
+        data['public_musts']=result['public_musts']
+        if guidance:
+            from .scouting_guidance import metadata
+            data['scouting_guidance']=metadata(guidance)
         db.execute('UPDATE configs SET version=version+1,data=?,approved=0,strategy_hash=?,updated=? WHERE job_id=?',
             (db.dumps(data),criteria_hash(data),db.now(),job_id))
         invalidate('job',job_id,False)
@@ -481,8 +492,8 @@ async def worker(sync_only=False):
             elif task['kind']=='backfill':await backfill()
             elif task['kind']=='exa_queries':
                 from .people_search import draft_queries
-                await draft_queries(payload['job_id'],payload['version'])
-            elif task['kind']=='strategies':await generate_strategies(payload['job_id'],payload['version'],payload['count'])
+                await draft_queries(payload['job_id'],payload['version'],payload.get('guidance'))
+            elif task['kind']=='strategies':await generate_strategies(payload['job_id'],payload['version'],payload['count'],payload.get('guidance'))
             elif task['kind']=='sheet_export':
                 from .sheets import publish
                 await publish(payload['export_id'])
@@ -499,9 +510,15 @@ async def worker(sync_only=False):
                 await run(payload['search_id'])
                 state=db.one('SELECT status,error FROM web_searches WHERE id=?',(payload['search_id'],))
                 if state['status']=='FAILED':raise IntegrationError(state['error'])
+            elif task['kind']=='content_fetch':
+                from .content_fetch import run
+                await run(payload['fetch_id'])
             elif task['kind']=='public_assessment':
                 from .public_assessment import assess
                 await assess(payload['assessment_id'])
+            elif task['kind']=='assessment_group':
+                from .assessment_groups import run
+                await run(payload['group_id'])
             else:raise IntegrationError('Tác vụ không hợp lệ.')
             db.execute("UPDATE tasks SET status='COMPLETED',updated=? WHERE id=?",(db.now(),task['id']))
         except Exception as e:

@@ -86,3 +86,15 @@ PROMPTS['exa_queries']=BASE+EXA_GUIDANCE+''' Trả đúng một query cho mỗi 
 Chỉ soạn truy vấn; không sửa strategy hay thêm/xóa ID.'''
 
 PROMPTS['criteria']+='\nTạo động lực cho đội ngũ/nhân viên là kỹ năng lãnh đạo hợp lệ. Ghi rõ đối tượng đội ngũ, không nhầm với động lực chuyển việc của ứng viên; động lực chuyển việc không được làm criteria.'
+
+MUST_GUIDANCE = """Return public_musts: exactly one {criterion_id,query} for each enabled MUST criterion.
+query must express the entire professional requirement in public English, preserving specialised years, ALL versus ANY, and alternatives.
+Do not expose private customer details. These clauses will be reviewed and included in every search strategy.
+Do not weaken requirements or put salary/contact/customer names in clauses."""
+PROMPTS['strategies']+='\n'+MUST_GUIDANCE
+PROMPTS['exa_queries']+='\n'+MUST_GUIDANCE
+
+PROMPTS['exa_queries']+=' Use concise clauses: target at most 100 characters per MUST and a short strategy angle. Entire combined MUST block plus angle and location must fit 1500 characters. Preserve all requirements and ALL/ANY semantics.'
+PROMPTS['strategies']+=' Use concise public MUST clauses and short Exa angles; entire combined MUST block plus angle and location must fit 1500 characters without dropping requirements.'
+for task in ('strategies','exa_queries'):
+    PROMPTS[task]+=' exa_query is ONLY the distinct scouting angle, preferably under 120 characters. NEVER repeat the shared public_musts in exa_query: backend prepends every MUST automatically. No location prefix is needed; backend applies the chosen scope.'

@@ -63,6 +63,8 @@ class BudgetRequest(Strict):
     output_tokens:int=Field(default=32000,ge=512,le=64000)
     context_chars:int=Field(default=250000,ge=1000,le=500000)
     max_cells:int=Field(default=300,ge=1,le=500)
+    public_context_chars:int=Field(default=100000,ge=1000,le=500000)
+    public_output_tokens:int=Field(default=24000,ge=512,le=64000)
     verified:bool
 
 @router.get('/settings/assessment-budget')

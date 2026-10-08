@@ -74,11 +74,18 @@ class CriteriaDraft(Strict):
     criteria: list[Criterion] = Field(min_length=1)
     review_notes: list[str]
 
+class PublicMust(Strict):
+    criterion_id: str
+    query: str = Field(min_length=3,max_length=1000)
+
 class CriteriaConfig(CriteriaDraft):
+    scouting_guidance: dict | None = None
+    public_musts: list[PublicMust] = Field(default_factory=list)
     strategies: list[Strategy] = Field(default_factory=list)
     policy: RetrievalPolicy = Field(default_factory=RetrievalPolicy)
 
 class StrategyPlan(Strict):
+    public_musts: list[PublicMust] = Field(default_factory=list)
     strategies: list[Strategy] = Field(min_length=2, max_length=20)
 
 class Assessment(Strict):
@@ -138,4 +145,5 @@ class ExaQuery(Strict):
     strategy_id: str
     exa_query: str = Field(min_length=3,max_length=1500)
 class ExaQueries(Strict):
+    public_musts: list[PublicMust] = Field(default_factory=list)
     queries: list[ExaQuery] = Field(min_length=1,max_length=20)

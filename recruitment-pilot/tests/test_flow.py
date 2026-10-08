@@ -43,6 +43,25 @@ def test_strategy_edit_keeps_criteria_approval_but_requires_matching_review(fake
     approve('IT-1',VersionBody(version=c['version']))
     assert engine.create_run('IT-1',c['version'])
 
+def test_approval_conflict_explains_stale_version_and_does_not_approve(fake_ai):
+    from fastapi import HTTPException
+    ingest_job();c=approve_fixture('IT-1')
+    db.execute("UPDATE configs SET version=version+1,approved=0 WHERE job_id='IT-1'")
+    with pytest.raises(HTTPException) as error:approve('IT-1',VersionBody(version=c['version']))
+    assert error.value.status_code==409 and 'phiên bản' in error.value.detail
+    assert not db.one('SELECT approved FROM configs')['approved']
+    approve('IT-1',VersionBody(version=c['version']+1))
+    assert db.one('SELECT approved FROM configs')['approved']
+
+def test_approval_conflict_requires_new_requirements_for_changed_jd(fake_ai):
+    from fastapi import HTTPException
+    ingest_job();c=approve_fixture('IT-1')
+    db.execute("UPDATE configs SET approved=0 WHERE job_id='IT-1'")
+    db.execute("UPDATE profiles SET revision=revision+1 WHERE kind='job'")
+    with pytest.raises(HTTPException) as error:approve('IT-1',VersionBody(version=c['version']))
+    assert error.value.status_code==409 and 'JD gốc đã thay đổi' in error.value.detail
+    assert not db.one('SELECT approved FROM configs')['approved']
+
 def test_inflight_strategy_does_not_overwrite_concurrent_criteria_edit(fake_ai,monkeypatch):
     ingest_job();approve_criteria('IT-1',VersionBody(version=1))
     async def editing_ai(task,payload,schema,validate):

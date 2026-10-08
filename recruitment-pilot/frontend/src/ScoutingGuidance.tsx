@@ -1,0 +1,20 @@
+import React,{useEffect,useState} from 'react';
+import {request} from './request';
+
+type Props={jobId:string;used:any;canGenerate:boolean;onGenerate:(version:number)=>void;onState:(version:number|undefined,dirty:boolean)=>void};
+export default function ScoutingGuidance({jobId,used,canGenerate,onGenerate,onState}:Props){
+ const [data,setData]=useState<any>(null),[draft,setDraft]=useState(''),[saving,setSaving]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState(''),[conflict,setConflict]=useState<any>(null);
+ const dirty=!!data&&draft!==data.current.content;
+ useEffect(()=>{let active=true;request<any>('/v1/jobs/'+jobId+'/scouting-guidance').then(value=>{if(active){setData(value);setDraft(value.current.content)}}).catch(e=>{if(active)setError(e.message)});return()=>{active=false}},[jobId]);
+ useEffect(()=>{onState(data?.current.version,dirty||!!conflict)},[data?.current.version,dirty,conflict]);
+ const save=async()=>{setSaving(true);setError('');setMessage('');try{const value=await request<any>('/v1/jobs/'+jobId+'/scouting-guidance','PUT',{version:data.current.version,content:draft});setData(value);setDraft(value.current.content);setConflict(null);setMessage('Đã lưu hướng dẫn phiên bản '+value.current.version+'. Chưa gọi AI; hướng tìm hiện có được giữ nguyên.')}catch(e){setError((e as Error).message);try{const latest=await request<any>('/v1/jobs/'+jobId+'/scouting-guidance');if(latest.current.version!==data.current.version)setConflict(latest)}catch{/* Preserve the draft on network errors too. */}}finally{setSaving(false)}};
+ return <section className="card" aria-label="Hướng dẫn AI tìm người"><h3>Hướng dẫn AI tìm người</h3><p>Điều chỉnh cách tiếp cận theo kinh nghiệm tuyển dụng cho riêng JD này. AI vẫn giữ mọi MUST đã duyệt và các kiểm tra kỹ thuật.</p>{!data?<p role="status">Đang tải hướng dẫn…</p>:<>
+ <label>Hướng dẫn nghiệp vụ<textarea aria-label="Hướng dẫn nghiệp vụ tìm người" rows={7} value={draft} disabled={saving} onChange={e=>{setDraft(e.target.value);setMessage('')}}/></label>
+ <p className="muted">Ví dụ: Ưu tiên người đang giữ vị trí Phó Tổng Giám đốc hoặc Head; không coi Vice President là chức danh tương đương.</p>
+ <div className="actions"><button disabled={saving||!dirty||!draft.trim()||!!conflict} onClick={save}>{saving?'Đang lưu…':'Lưu hướng dẫn'}</button><button className="secondary" disabled={saving} onClick={()=>{setDraft(data.default_content);setMessage('Đã đưa mặc định vào bản nháp. Bấm Lưu hướng dẫn để áp dụng cho lượt AI tiếp theo.')}}>Khôi phục mặc định</button><button className="secondary" disabled={saving||dirty||!!conflict||!canGenerate} onClick={()=>onGenerate(data.current.version)}>Sinh lại hướng tìm kiếm (có phí AI)</button></div>
+ {dirty&&<p className="notice warn">Có hướng dẫn chưa lưu. Lưu trước khi sinh lại hoặc soạn truy vấn.</p>}
+ <p>Hướng dẫn đã lưu: {data.current.version===0?'Mặc định':'phiên bản '+data.current.version}. Hướng tìm hiện tại: {used?'dùng hướng dẫn phiên bản '+used.version:'chưa lưu phiên bản hướng dẫn'}.</p>
+ <p className="muted">Lưu không gọi AI hoặc tìm lại. Sinh lại tạo bản hướng tìm chưa duyệt; kết quả và lượt đang chạy vẫn giữ bản cũ.</p>
+ {!!data.history.length&&<details><summary>Lịch sử hướng dẫn ({data.history.length})</summary>{data.history.map((h:any)=><div key={h.version}><strong>Phiên bản {h.version} · {new Date(h.created).toLocaleString()}</strong><p style={{whiteSpace:'pre-wrap'}}>{h.content}</p></div>)}</details>}
+ </>}{error&&<p role="alert" className="notice error">{error}</p>}{conflict&&<div className="notice warn"><p>Tab khác đã lưu phiên bản {conflict.current.version}. Bản nháp của bạn vẫn giữ nguyên.</p><p style={{whiteSpace:'pre-wrap'}}>Bản hiện hành: {conflict.current.content}</p><button className="secondary" onClick={()=>{setData(conflict);setConflict(null);setError('');setMessage('Đã tải phiên bản mới làm mốc; bản nháp của bạn vẫn giữ. Kiểm tra trước khi lưu.')}}>Tải bản hiện hành, giữ nháp của tôi</button></div>}{message&&<p role="status">{message}</p>}</section>;
+}

@@ -10,7 +10,8 @@ def public_sources(job_id):
 
 def validate_query(query,job_id=None):
     if not 3<=len(query.strip())<=1500:raise IntegrationError('Truy vấn Exa cần từ 3 đến 1.500 ký tự.')
-    if re.search(r'\S+@\S+|(?:\+?\d[\s().-]*){8,}|(?:\$|USD|VND|salary|budget|lương|ngân sách)',query,re.I):
+    checked=re.sub(r'(?i)(?:budget[- ](?:aware|constrained)|(?:advertising|marketing|campaign|ad|ads|token|tokens|compute|memory|latency|cost)\s+budget(?:s)?(?:\s+(?:management|optimization|allocation))?|budget\s+(?:management|optimization|allocation))','professional resource planning',query)
+    if re.search(r'\S+@\S+|(?:\+?\d[\s().-]*){8,}|(?:\$|USD|VND|salary|budget|lương|ngân sách)',checked,re.I):
         raise IntegrationError('Truy vấn Exa không được chứa liên hệ, lương hoặc ngân sách.')
     if job_id is None:return
     words=lambda s:re.findall(r'\w+',s.lower())
@@ -23,7 +24,24 @@ def validate_query(query,job_id=None):
             if phrase in query_text and phrase not in public:
                 raise IntegrationError('Truy vấn có đoạn trùng private note; sửa thành yêu cầu chuyên môn công khai trước khi gửi Exa.')
 
-async def draft_queries(job_id,version):
+
+def must_block(data,job_id=None):
+    expected={c['id'] for c in data['criteria'] if c['enabled'] and c['type']=='MUST'}
+    clauses=data.get('public_musts',[])
+    ids=[c['criterion_id'] for c in clauses]
+    if len(ids)!=len(set(ids)) or set(ids)!=expected:
+        raise IntegrationError('Hướng tìm cũ chưa có đầy đủ MUST công khai. Soạn truy vấn, kiểm tra và duyệt lại.')
+    for clause in clauses:validate_query(clause['query'],job_id)
+    return 'Required professional experience: '+'; '.join(c['query'].strip() for c in clauses)+'. ' if clauses else ''
+
+def composed_query(data,strategy,scope,job_id=None):
+    from .location_scope import effective_query
+    query=must_block(data,job_id)+strategy['exa_query'].strip()
+    final=effective_query(query,scope)
+    validate_query(final,job_id)
+    return query,final
+
+async def draft_queries(job_id,version,guidance=None):
     config,_=engine.checked_config(job_id,version)
     if not config['criteria_approved']:raise IntegrationError('Xác nhận criteria trước khi soạn truy vấn.')
     if config['strategy_hash']!=engine.criteria_hash(json.loads(config['data'])):
@@ -35,17 +53,28 @@ async def draft_queries(job_id,version):
         ids=[q['strategy_id'] for q in result['queries']]
         if len(ids)!=len(expected) or set(ids)!=expected:raise IntegrationError('AI trả sai tập strategy IDs.')
         for q in result['queries']:validate_query(q['exa_query'],job_id)
+        planned={**data,'public_musts':result['public_musts']}
+        must_block(planned,job_id)
+        for q in result['queries']:
+            for scope in ('VIETNAM','INTERNATIONAL','ANY'):composed_query(planned,q,scope,job_id)
     result=await engine.ai('exa_queries',{'public_jd':public_sources(job_id),
-        'strategies':[{'id':s['id'],'name':s['name'],'description':s['description']} for s in strategies]},ExaQueries,validate)
+        **({'recruiter_guidance':guidance['content']} if guidance else {}),
+        'criteria':data['criteria'],'strategies':[{'id':s['id'],'name':s['name'],'description':s['description']} for s in strategies]},ExaQueries,validate,
+        **({'prompt_override':guidance['prompt']} if guidance else {}))
     queries={q['strategy_id']:q['exa_query'].strip() for q in result['queries']}
     with db.LOCK:
         engine.checked_config(job_id,version)
         for s in strategies:s['exa_query']=queries[s['id']]
+        data['public_musts']=result['public_musts']
+        if guidance:
+            from .scouting_guidance import metadata
+            data['scouting_guidance']=metadata(guidance)
         db.execute('UPDATE configs SET version=version+1,data=?,approved=0,updated=? WHERE job_id=?',(db.dumps(data),db.now(),job_id))
         engine.invalidate('job',job_id,False)
 
 @engine.serialized
-def create(job_id,version,ids,refresh=False,location_scope=None):
+def create(job_id,version,ids,refresh=False,location_scope=None,search_type='auto'):
+    if search_type not in ('auto','deep'):raise IntegrationError('Chọn chế độ tìm kiếm Auto hoặc Deep.')
     c,p=engine.checked_config(job_id,version);data=json.loads(c['data'])
     if not c['approved'] or not c['criteria_approved'] or c['strategy_hash']!=engine.criteria_hash(data):
         raise IntegrationError('Lưu và duyệt hướng tìm kiếm trước khi gửi Exa.')
@@ -56,10 +85,13 @@ def create(job_id,version,ids,refresh=False,location_scope=None):
         if not s or not s['enabled']:raise IntegrationError('Strategy không tồn tại hoặc đã tắt.')
         validate_query(s.get('exa_query',''),job_id)
     from .location_scope import effective_query
-    chosen=[{**strategies[sid],'effective_query':effective_query(strategies[sid]['exa_query'],location_scope)} for sid in sorted(ids)]
+    chosen=[]
+    for sid in sorted(ids):
+        query,final=composed_query(data,strategies[sid],location_scope,job_id)
+        chosen.append({**strategies[sid],'composed_query':query,'effective_query':final})
     for s in chosen:validate_query(s['effective_query'],job_id)
     snapshot={'job_id':job_id,'job_revision':p['revision'],'job':json.loads(p['data']),
-        'config_version':version,'config':data,'strategies':chosen,'location_scope':location_scope,'adapter_version':exa_search.VERSION}
+        'config_version':version,'config':data,'scouting_guidance':data.get('scouting_guidance'),'strategies':chosen,'location_scope':location_scope,'search_type':search_type,'adapter_version':exa_search.VERSION}
     fingerprint=engine.digest(db.dumps(snapshot));cutoff=(datetime.now(timezone.utc)-timedelta(hours=24)).isoformat()
     with db.LOCK,db.conn() as conn:
         old=conn.execute('SELECT id FROM people_searches WHERE fingerprint=? AND created>=? ORDER BY created DESC LIMIT 1',(fingerprint,cutoff)).fetchone()
@@ -67,7 +99,7 @@ def create(job_id,version,ids,refresh=False,location_scope=None):
         gid=str(uuid.uuid4())
         conn.execute('INSERT INTO people_searches VALUES(?,?,?,?,?)',(gid,job_id,fingerprint,db.dumps(snapshot),db.now()))
         for s in chosen:
-            sid=exa_search.ensure_search(conn,s['exa_query'],refresh,'people',location_scope)
+            sid=exa_search.ensure_search(conn,s['composed_query'],refresh,'people',location_scope,search_type)
             conn.execute('INSERT INTO people_search_items VALUES(?,?,?)',(gid,s['id'],sid))
     return detail(gid)
 

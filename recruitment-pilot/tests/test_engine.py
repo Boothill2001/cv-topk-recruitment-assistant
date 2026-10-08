@@ -33,7 +33,7 @@ def fake_ai(monkeypatch):
             value=json.loads(json.dumps(PROFILE));value.pop('_meta',None)
             value['facts'][0]['evidence']=[{'source_id':payload['sources'][0]['source_id'],'quote':payload['sources'][0]['text'][:20]}]
         elif task=='criteria':value={k:json.loads(json.dumps(CONFIG[k])) for k in ('criteria','review_notes')}
-        elif task=='strategies':value={'strategies':json.loads(json.dumps(CONFIG['strategies']))}
+        elif task=='strategies':value={'strategies':json.loads(json.dumps(CONFIG['strategies'])),'public_musts':[{'criterion_id':'C1','query':'Python experience'}]}
         else:raise AssertionError('Unexpected '+task)
         if validate:validate(value)
         return schema.model_validate(value).model_dump()

@@ -11,15 +11,16 @@ class SearchBody(Strict):
     refresh:bool=False
     mode:Literal['web','people']='web'
     location_scope:Scope|None=None
+    search_type:Literal['auto','deep']='auto'
 
 @router.get('/connection')
 def connection():return {'provider':'exa','configured':exa_search.configured(),'endpoint':'search','default_results':10}
 
 @router.get('')
-def history():return db.rows('SELECT id,query,mode,location_scope,effective_query,status,attempts,error,created,updated FROM web_searches ORDER BY created DESC LIMIT 30')
+def history():return db.rows('SELECT id,query,mode,search_type,location_scope,effective_query,status,attempts,error,created,updated FROM web_searches ORDER BY created DESC LIMIT 30')
 
 @router.post('',status_code=202)
-def create(body:SearchBody):return exa_search.create(body.query,body.refresh,body.mode,body.location_scope)
+def create(body:SearchBody):return exa_search.create(body.query,body.refresh,body.mode,body.location_scope,body.search_type)
 
 @router.get('/{sid}')
 def detail(sid:str):

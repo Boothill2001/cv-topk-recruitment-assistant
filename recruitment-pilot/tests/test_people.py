@@ -5,6 +5,17 @@ from backend.errors import IntegrationError
 from test_engine import database,fake_ai,approve_fixture,file,read
 from test_exa import mock_api,PAYLOAD
 
+def test_group_search_type_snapshot_and_cache(fake_ai,monkeypatch):
+    version=setup(fake_ai,monkeypatch)
+    calls=mock_api(monkeypatch,[(200,PAYLOAD)])
+    auto=people.create('IT-1',version,['S1'])
+    deep=people.create('IT-1',version,['S1'],search_type='deep')
+    assert auto['id']!=deep['id']
+    assert deep['snapshot']['search_type']=='deep'
+    assert people.create('IT-1',version,['S1'],search_type='deep')['id']==deep['id']
+    asyncio.run(exa.run(deep['items'][0]['search']['id']))
+    assert calls[0][1]['json']['type']=='deep'
+
 def setup(fake_ai,monkeypatch):
     monkeypatch.setenv('EXA_API_KEY','test-key')
     asyncio.run(engine.ingest([file('j','IT-1 JD','job_public')],read,True))
@@ -55,7 +66,7 @@ def test_query_batch_preserves_strategy_and_version(fake_ai,monkeypatch):
     async def fake(task,payload,schema,validate):
         calls.append(task)
         assert all(s['group']=='job_public' for s in payload['public_jd'])
-        out={'queries':[{'strategy_id':s['id'],'exa_query':'Python professional profiles '+s['id']} for s in before['strategies']]}
+        out={'public_musts':[{'criterion_id':'C1','query':'Python experience'}],'queries':[{'strategy_id':s['id'],'exa_query':'Python professional profiles '+s['id']} for s in before['strategies']]}
         validate(out);return schema.model_validate(out).model_dump()
     monkeypatch.setattr(engine,'ai',fake);asyncio.run(people.draft_queries('IT-1',v))
     row=db.one('SELECT * FROM configs');after=json.loads(row['data'])

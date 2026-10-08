@@ -108,3 +108,20 @@ def test_preview_no_task_or_ai(fake_ai):
     assert p['max_sources']==1 and p['default_sources']==1
     assert len(fake_ai)==count and len(db.rows('SELECT id FROM tasks'))==tasks
     assert not db.rows('SELECT id FROM public_assessments')
+
+
+def test_attempt_usage_includes_failed_call_and_survives_failure(fake_ai,monkeypatch):
+    row=service.create('IT-1',setup(fake_ai),'S')
+    async def failing(task,payload,schema,validate,**kw):
+        kw['on_attempt']();kw['on_usage']({'prompt_tokens':10,'completion_tokens':2,'total_tokens':12},'FAILED')
+        raise IntegrationError('Provider failure')
+    monkeypatch.setattr(engine,'ai',failing)
+    with pytest.raises(IntegrationError):asyncio.run(service.assess(row['id']))
+    assert service.detail(row['id'])['usage']['total_tokens']==12
+    service.retry(row['id'])
+    async def succeeds(task,payload,schema,validate,**kw):
+        kw['on_attempt']();kw['on_usage']({'prompt_tokens':20,'completion_tokens':3,'total_tokens':23},'COMPLETED')
+        return schema.model_validate(answer()).model_dump()
+    monkeypatch.setattr(engine,'ai',succeeds);asyncio.run(service.assess(row['id']))
+    assert service.detail(row['id'])['usage']['total_tokens']==35
+    assert len(service.detail(row['id'])['usage']['attempt_usage'])==2

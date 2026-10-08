@@ -271,6 +271,7 @@ def update_config(job_id:str,body:ConfigUpdate):
     with db.LOCK,db.conn() as c:
         old=c.execute('SELECT * FROM configs WHERE job_id=?',(job_id,)).fetchone()
         if not old or old['version']!=body.version:raise HTTPException(409,'Phiên bản đã đổi, tải lại.')
+        config['scouting_guidance']=json.loads(old['data']).get('scouting_guidance')
         same=engine.criteria_hash(json.loads(old['data']))==engine.criteria_hash(config)
         # Retain old strategy text for review, but edits to criteria require regeneration.
         valid_strategy=old['strategy_hash'] if same else None
@@ -288,21 +289,31 @@ def approve_criteria(job_id:str,body:VersionBody):
         db.execute('UPDATE configs SET criteria_approved=1,updated=? WHERE job_id=?',(db.now(),job_id))
     return get_config(job_id)
 
-class StrategyRequest(VersionBody):count:int=Field(default=5,ge=2,le=20)
+class StrategyRequest(VersionBody):
+    count:int=Field(default=5,ge=2,le=20)
+    guidance_version:int|None=Field(default=None,ge=0)
 @app.post('/api/jobs/{job_id}/strategies')
 def strategies(job_id:str,body:StrategyRequest):
     with db.LOCK:
         config,_=engine.checked_config(job_id,body.version)
         if not config['criteria_approved']:raise IntegrationError('Duyệt criteria trước khi sinh strategy.')
-        return {'task_id':engine.enqueue('strategies',{'job_id':job_id,'version':body.version,'count':body.count})}
+        from .scouting_guidance import capture
+        guidance=capture(job_id,body.guidance_version,'strategies')
+        return {'task_id':engine.enqueue('strategies',{'job_id':job_id,'version':body.version,'count':body.count,'guidance':guidance})}
 
 @app.post('/api/jobs/{job_id}/approve')
 def approve(job_id:str,body:VersionBody):
     with db.LOCK,db.conn() as c:
         config=c.execute('SELECT * FROM configs WHERE job_id=?',(job_id,)).fetchone()
         p=c.execute("SELECT * FROM profiles WHERE kind='job' AND id=?",(job_id,)).fetchone()
-        if not config or config['version']!=body.version or not p or p['status']!='READY' or config['source_revision']!=p['revision']:
-            raise HTTPException(409,'JD/config đã đổi hoặc chưa hợp lệ.')
+        if not config:
+            raise HTTPException(409,'Chưa có yêu cầu cho JD. Chuẩn bị yêu cầu trước khi duyệt.')
+        if config['version']!=body.version:
+            raise HTTPException(409,f'Yêu cầu đã đổi từ phiên bản {body.version} sang {config["version"]}. Tải bản mới, kiểm tra rồi xác nhận lại.')
+        if not p or p['status']!='READY':
+            raise HTTPException(409,'JD chưa sẵn sàng. Kiểm tra trạng thái đọc JD trước khi duyệt.')
+        if config['source_revision']!=p['revision']:
+            raise HTTPException(409,'JD gốc đã thay đổi. Chuẩn bị yêu cầu mới rồi kiểm tra và duyệt lại.')
         engine.validate_config(json.loads(config['data']))
         if not config['criteria_approved'] or config['strategy_hash']!=engine.criteria_hash(json.loads(config['data'])):
             raise IntegrationError('Duyệt criteria rồi sinh strategy từ bản đã duyệt trước khi duyệt matching.')
@@ -418,6 +429,13 @@ from .people_api import router as people_router
 app.include_router(people_router)
 from .public_assessment_api import router as public_assessment_router
 app.include_router(public_assessment_router)
+
+from .content_api import router as content_router
+app.include_router(content_router)
+from .assessment_group_api import router as assessment_group_router
+app.include_router(assessment_group_router)
+from .scouting_guidance import router as scouting_guidance_router
+app.include_router(scouting_guidance_router)
 
 FRONTEND=db.ROOT/'frontend'/'dist'
 @app.get('/assets/{asset_path:path}')

@@ -70,6 +70,24 @@ def test_credentials_isolated_and_never_returned(monkeypatch,tmp_path):
     assert not ai_runtime.configured('anthropic')
     assert 'TEST_OPENAI' not in json.dumps(ai_runtime.provider_catalog())
 
+def test_public_json_retry_does_not_echo_malformed_output(monkeypatch):
+    from backend.search_schema import PublicJudgeBatch
+    db.set_setting('provider','deepseek');db.set_setting('model','deepseek-flash')
+    db.set_setting('ai_check',{'provider':'deepseek','model':'deepseek-flash','ok':True})
+    monkeypatch.setattr(ai_runtime,'key',lambda *a:'TEST')
+    valid={'items':[{'id':'PUB001','a':[{'c':'C1','s':'UNKNOWN','why':'Unknown','q':[]}]}]}
+    malformed='{"items":['
+    prompts=[];rejected=[]
+    class Adapter:
+        async def generate(self,*args):
+            prompts.append(args[4])
+            return (malformed if len(prompts)==1 else json.dumps(valid)),{'total_tokens':10}
+    monkeypatch.setattr(ai_runtime,'adapter',lambda *a:Adapter())
+    result=asyncio.run(ai_runtime.ai('public_content_assessment',{},PublicJudgeBatch,on_rejected=rejected.append))
+    assert result['items'][0]['candidate_id']=='PUB001' and len(prompts)==2
+    assert len(rejected)==1 and rejected[0]['output']==malformed
+    assert 'Previous rejected JSON' not in prompts[1] and 'exactly one complete JSON object' in prompts[1]
+
 def test_selected_customer_key_file_never_falls_back_to_another_account(monkeypatch,tmp_path):
     monkeypatch.setenv('OPENAI_API_KEY','DIFFERENT_ACCOUNT_ENV')
     f=tmp_path/'customer.env';f.write_text('OPENAI_API_KEY=CUSTOMER_ACCOUNT',encoding='utf-8')

@@ -9,3 +9,5 @@ __pycache__/
 *.env.*
 client_secret*.json
 *.log
+
+!docs/PUBLIC-PEOPLE-HANDOVER.md
