@@ -1,6 +1,6 @@
 # CV TopK Recruitment Assistant
 
-Private source repository for the recruitment pilot and its separate English portfolio.
+Source repository for the recruitment pilot and its separate English portfolio.
 Start reading **[docs/START-HERE.md](docs/START-HERE.md)** for the current architecture, teaching instructions, and debugging map.
 
 | Folder | Purpose |
@@ -9,7 +9,7 @@ Start reading **[docs/START-HERE.md](docs/START-HERE.md)** for the current archi
 | portfolio-en | Separate English UI showcase with fictional data and simulated scoring |
 | docs | Architecture handoff and code-learning roadmap |
 
-Customer data, credentials, uploads, database, backups, screenshots and videos are intentionally excluded. A clone contains source code, not the existing customer database. Do not treat portfolio sample scores as AI results.
+Customer data, credentials, uploads, database and backups are intentionally excluded. Only explicitly reviewed portfolio screenshots are published. A clone contains source code, not the existing customer database. Do not treat portfolio sample scores as AI results.
 
 ## Local setup
 
@@ -31,4 +31,9 @@ npm.cmd --prefix frontend run build
 
 Tests use isolated fixtures/mocked providers unless a specifically named live diagnostic is deliberately run. Do not run `backend/diagnose_*` or `backend/validate_structured.py` blindly: they can use configured real data/services. Check their code first.
 
-This is a single-customer localhost pilot. Authentication, tenant isolation, cloud deployment and independently benchmarked ranking quality are not provided by making this repository private.
+The source setup documented above targets the local pilot. See the portfolio evidence below for the separate hosted two-user release and its verification limits. Multi-tenant isolation and independently benchmarked ranking quality are not claimed.
+
+## Deployed Techdy pilot — portfolio evidence
+
+[View the actual deployed interface and engineering notes](docs/portfolio/README.md). Includes a fresh screenshot, the recruiter-controlled workflow, verified deployment checks, and explicit remaining limitations. The hosted pilot is restricted to its two users; access credentials are not published.
+
