@@ -9,6 +9,7 @@ from pydantic import Field
 from .models import Strict
 from . import ai_assessment
 from .errors import IntegrationError
+from typing import Literal
 
 router=APIRouter(prefix='/api/v1')
 
@@ -47,7 +48,10 @@ def retry_search(search_id:str):
     if not d['is_current']:raise IntegrationError('Yêu cầu hoặc hồ sơ đã đổi; mở JD để đánh giá lại.')
     if d['attempts']>=3:raise IntegrationError('Đã hết 3 lượt thử. Kiểm tra lỗi hoặc đổi model trước khi tạo lượt mới.')
     ids=list(d['group']) if d.get('scope')=='single-cv' else None
-    return {'search_id':service.create(d['job_id'],d['config_version'],d['input_count'],candidate_ids=ids)}
+    if d.get('assessment_engine')=='JEV':
+        from .jev import prepare_retry
+        prepare_retry(search_id)
+    return {'search_id':service.create(d['job_id'],d['config_version'],d['input_count'],candidate_ids=ids,assessment_engine=d.get('assessment_engine','CURRENT'))}
 
 @router.get('/uploaded-cvs/{candidate_id}/source')
 def uploaded_source(candidate_id:str):
@@ -87,7 +91,12 @@ def review_rules(job_id:str):
 
 @router.post('/jobs/{job_id}/searches',status_code=202)
 def create(job_id:str,body:SearchRequest):
-    return {'search_id':service.create(job_id,body.config_version,body.candidate_limit)}
+    return {'search_id':service.create(job_id,body.config_version,body.candidate_limit,assessment_engine=body.assessment_engine)}
+
+@router.post('/jobs/{job_id}/search-preview')
+def preview_internal(job_id:str,body:SearchRequest):
+    if body.assessment_engine!='JEV':raise HTTPException(422,'Preview này dành cho Jev trong kho CV.')
+    return service.create(job_id,body.config_version,body.candidate_limit,assessment_engine='JEV',preview=True)
 
 @router.get('/searches')
 def history():
@@ -97,6 +106,59 @@ def history():
 def detail(search_id:str):
     try:return service.detail(search_id)
     except KeyError:raise HTTPException(404,'Không tìm thấy lượt tìm kiếm.')
+
+class EvidenceReview(Strict):
+    candidate_id:str
+    criterion_id:str
+    decision:Literal['CORRECT','INCORRECT','INSUFFICIENT']
+    note:str=Field(default='',max_length=3000)
+
+@router.post('/searches/{search_id}/evidence-reviews')
+def review_evidence(search_id:str,body:EvidenceReview):
+    search=detail(search_id)
+    candidate=next((i for i in search['results'] if i['candidate_id']==body.candidate_id),None)
+    assessment=next((a for a in candidate['assessments'] if a['criterion_id']==body.criterion_id),None) if candidate else None
+    if not assessment or not search['result_run_id']:raise HTTPException(422,'Tiêu chí không thuộc kết quả đã validate của lượt này.')
+    # Separate append-only evidence feedback, never a candidate-fit ground truth label.
+    note=db.dumps({'kind':'evidence-review','search_id':search_id,'criterion_id':body.criterion_id,
+                   'assessment_hash':service.engine.digest(db.dumps(assessment)),'note':body.note})
+    db.execute('INSERT INTO feedback(run_id,candidate_id,decision,note,created) VALUES(?,?,?,?,?)',
+      (search['result_run_id'],body.candidate_id,'EVIDENCE_'+body.decision,note,db.now()))
+    return {'ok':True}
+
+@router.get('/searches/{search_id}/evidence-reviews')
+def evidence_reviews(search_id:str):
+    search=detail(search_id)
+    return [{**r,'details':json.loads(r['note'])} for r in db.rows("SELECT * FROM feedback WHERE run_id=? AND decision LIKE 'EVIDENCE_%' ORDER BY id",(search['result_run_id'],))]
+
+@router.get('/searches/{search_id}/trace')
+def internal_trace(search_id:str):
+    from . import jev
+    search=detail(search_id)
+    if search.get('assessment_engine')!='JEV':raise HTTPException(422,'Trace này dành cho Jev kho CV; lịch sử engine cũ vẫn giữ riêng.')
+    row=db.one('SELECT snapshot,fingerprint FROM searches WHERE id=?',(search_id,))
+    snap=json.loads(row['snapshot'])
+    # Deliberately allowlist; never export the group profile, private sources or settings.
+    from .pipeline_history import assessment
+    pipeline_id=assessment(search_id)
+    return {'schema_version':'internal-trace-1','pipeline_run_id':pipeline_id,'search_id':search_id,'status':search['status'],
+      'created':search['created'],'updated':search['updated'],'fingerprint':row['fingerprint'],
+      'job':{'id':search['job_id'],'revision':snap['job']['revision'],'config_version':search['config_version']},
+      'engine':{'name':'JEV','provider':search['provider'],'model':search['model'],
+                'adapter_version':snap['internal_adapter_version'],'scorer_version':search['scorer_version']},
+      'retrieval':{'pool_size':search['pool_size'],'selected_count':search['input_count'],
+                   'candidates':[{'candidate_id':eid,'profile_revision':p['revision'],'be_rank':p['be_rank'],
+                     'source_revisions':[{'source_id':m['source_id'],'revision':m['revision']} for m in p['sources'] if m.get('group')=='candidate_public']} for eid,p in snap['group'].items()]},
+      'input_snapshot':snap['jev'],'provider_steps':jev.export_steps(search_id),
+      'validated_results':search['results'],'report':search['jev_report'],
+      'recruiter_reviews':evidence_reviews(search_id),
+      'notice':'Contains stored CV text. Local recruiter review only; API keys, headers and private notes are excluded. Cost is an estimate, not a provider invoice.'}
+
+@router.get('/searches/{search_id}/trace-export')
+def export_internal_trace(search_id:str):
+    from fastapi.responses import Response
+    return Response(db.dumps(internal_trace(search_id)),media_type='application/json',
+      headers={'Content-Disposition':f'attachment; filename="jev-trace-{search_id}.json"','Cache-Control':'no-store'})
 
 @router.get('/searches/{search_id}/results')
 def results(search_id:str,limit:int=Query(default=10,ge=1,le=20)):

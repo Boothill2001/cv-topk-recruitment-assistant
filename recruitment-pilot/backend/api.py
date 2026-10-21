@@ -7,7 +7,7 @@ from fastapi import FastAPI, HTTPException, Request, Query, UploadFile, File, Fo
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from . import db, engine
+from . import db, engine, online
 from .models import ConfigUpdate, MatchRequest, ReportRequest, FeedbackRequest, Fact, RetrievalPolicy
 from .integrations import IntegrationError, check_ai, authorize, Drive, redact_error, sheet_connected
 from .ai_runtime import provider_catalog, available_models
@@ -16,18 +16,25 @@ from .prompts import PROMPTS, VERSION
 
 @asynccontextmanager
 async def lifespan(app):
+    online.configure()
     db.init()
+    online.check_clean_runtime()
     if db.setting('model') is None:db.set_setting('model','deepseek-flash')
     if db.setting('provider') is None:db.set_setting('provider','deepseek')
-    jobs=[asyncio.create_task(engine.worker()),asyncio.create_task(engine.worker(sync_only=True)),asyncio.create_task(engine.scheduler())]
+    jobs=[asyncio.create_task(engine.worker())]
+    if not online.enabled():jobs.extend([asyncio.create_task(engine.worker(sync_only=True)),asyncio.create_task(engine.scheduler())])
     yield
     for t in jobs:t.cancel()
     await asyncio.gather(*jobs,return_exceptions=True)
 
 app=FastAPI(title='Recruitment pilot',lifespan=lifespan)
+app.include_router(online.router)
+from .inbound_review import router as inbound_router
+app.include_router(inbound_router)
 
 @app.middleware('http')
 async def local_only(request:Request,call_next):
+    if online.enabled():return await online.middleware(request,call_next)
     # Bind loopback AND reject DNS-rebinding hosts/cross-site mutation requests.
     host=request.headers.get('host','').split(':')[0]
     if host not in ('127.0.0.1','localhost','testserver'):return JSONResponse({'detail':'Localhost only'},status_code=403)
@@ -71,14 +78,19 @@ def backfill():return {'task_id':engine.enqueue('backfill',{}),'estimate':engine
 
 @app.post('/api/jobs/upload')
 async def upload_job(file:UploadFile=File(...),job_id:str=Form(''),private_note:str=Form('')):
+    if online.enabled() and private_note.strip():raise HTTPException(403,'Pilot online chỉ nhận JD công khai, không nhận private note.')
     from io import BytesIO
     from pypdf import PdfReader
     import hashlib,time
     content=await file.read(15*1024*1024+1)
     if len(content)>15*1024*1024:raise HTTPException(413,'PDF tối đa 15 MB.')
     if not content.startswith(b'%PDF-'):raise HTTPException(400,'Chỉ nhận JD PDF.')
-    job_id=job_id.strip() or engine.identity(file.filename or '', 'job_public') or 'IT-'+str(int(time.time()*1000))
-    if engine.identity(job_id,'job_public')!=job_id:raise HTTPException(400,'Mã job dạng IT-602 hoặc IT-595c.')
+    job_id=job_id.strip() or engine.identity(file.filename or '', 'job_public') or 'JD'+str(int(time.time()*1000))
+    import re
+    if not re.fullmatch(r'(?:JD|IT-)\d+[a-z]?',job_id,re.I):raise HTTPException(400,'Mã job dạng JD602 hoặc JD595c.')
+    canonical_id=engine.identity(job_id,'job_public')
+    if not canonical_id:raise HTTPException(400,'Mã job dạng JD602 hoặc JD595c.')
+    job_id=canonical_id
     if len(private_note)>30000:raise HTTPException(400,'Note tối đa 30.000 ký tự.')
     try:text=await asyncio.to_thread(lambda:'\n'.join(p.extract_text() or '' for p in PdfReader(BytesIO(content)).pages))
     except Exception:raise HTTPException(400,'Không đọc được PDF; kiểm tra file hoặc mật khẩu.')
@@ -222,8 +234,9 @@ def mapping(file_id:str,body:Mapping):
     f=db.one('SELECT * FROM files WHERE id=?',(file_id,))
     if not f or f['group_name']=='reference':raise HTTPException(404,'File không cần mapping.')
     valid=engine.identity(body.entity_id,f['group_name'])
-    if valid!=body.entity_id:raise HTTPException(400,'Mã phải là CV123 hoặc IT-123/IT-595c đúng loại.')
-    db.set_setting('mapping:'+file_id,body.entity_id)
+    import re
+    if not valid or not re.fullmatch(r'(?:CV\d+|(?:JD|IT-)\d+[a-z]?)',body.entity_id,re.I):raise HTTPException(400,'Mã phải là CV123 hoặc JD123/JD595c đúng loại.')
+    db.set_setting('mapping:'+file_id,valid)
     return {'ok':True,'message':'Đã lưu mapping. Đồng bộ/nạp lại snapshot để áp dụng.'}
 
 @app.get('/api/profiles/{kind}')
@@ -438,6 +451,8 @@ from .scouting_guidance import router as scouting_guidance_router
 app.include_router(scouting_guidance_router)
 
 FRONTEND=db.ROOT/'frontend'/'dist'
+from .pipeline_api import router as pipeline_router
+app.include_router(pipeline_router)
 @app.get('/assets/{asset_path:path}')
 def asset(asset_path:str):
     assets=(FRONTEND/'assets').resolve();p=(assets/asset_path).resolve()

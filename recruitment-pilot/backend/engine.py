@@ -14,10 +14,17 @@ WEIGHTS={'MUST':3,'NICE':1,'OPTIONAL':.5}
 POINTS={'MET':100,'PARTIAL':50,'NOT_MET':0}
 
 def identity(name,group):
-    pattern=r'(?i)(?<![a-z0-9])CV\s*[-_]?\s*(\d+)(?!\d)' if group.startswith('candidate') else r'(?i)(?<![a-z0-9])IT\s*[-_]?\s*(\d+[a-z]?)(?![a-z0-9])'
+    pattern=r'(?i)(?<![a-z0-9])CV\s*[-_]?\s*(\d+)(?!\d)' if group.startswith('candidate') else r'(?i)(?<![a-z0-9])(?:IT|JD)\s*[-_]?\s*(\d+[a-z]?)(?![a-z0-9])'
     m=re.search(pattern,name)
     if not m:return None
-    return ('CV'+m[1]) if group.startswith('candidate') else ('IT-'+m[1].lower())
+    if group.startswith('candidate'):return 'CV'+m[1]
+    suffix=m[1].lower()
+    if re.match(r'(?i)JD',m[0]):
+        legacy='IT-'+suffix
+        if db.one("SELECT id FROM profiles WHERE id=? AND kind='job'",(legacy,)) or db.one("SELECT id FROM files WHERE entity_id=? AND group_name='job_public'",(legacy,)):
+            return legacy
+        return 'JD'+suffix
+    return 'IT-'+suffix
 
 def digest(text): return hashlib.sha256(text.encode()).hexdigest()
 def normalize(s): return re.sub(r'\s+',' ',s).strip()
@@ -106,8 +113,14 @@ def enqueue(kind,payload):
     with db.LOCK,db.conn() as c:
         old=c.execute("SELECT id FROM tasks WHERE kind=? AND payload=? AND status IN ('PENDING','RUNNING')",(kind,serialized)).fetchone()
         if old:return old['id']
-        return c.execute('INSERT INTO tasks(kind,payload,status,created,updated) VALUES(?,?,?,?,?)',
+        task_id=c.execute('INSERT INTO tasks(kind,payload,status,created,updated) VALUES(?,?,?,?,?)',
                          (kind,serialized,'PENDING',db.now(),db.now())).lastrowid
+        from .online import enabled, actor
+        current=actor.get()
+        if enabled() and current:
+            import os
+            c.execute('INSERT INTO pilot_task_actors VALUES(?,?,?,?)',(task_id,current['username'],current['request_id'],os.environ['PILOT_RELEASE']))
+        return task_id
 
 def invalidate(kind,entity,reset_criteria=True):
     if kind=='job':
@@ -363,6 +376,10 @@ def create_run(job_id,version,candidate_ids=None):
 
 def current(run):
     snap=json.loads(run['snapshot']) if isinstance(run['snapshot'],str) else run['snapshot']
+    if snap.get('inbound_review_set'):
+        from .inbound_review import row,input_current,stored_snapshot
+        review=row(snap['inbound_review_set'])
+        return bool(review['revealed']) and input_current(review,stored_snapshot(review))
     config=db.one('SELECT * FROM configs WHERE job_id=?',(run['job_id'],))
     job=db.one("SELECT revision,status FROM profiles WHERE kind='job' AND id=?",(run['job_id'],))
     single=snap.get('scope')=='single-cv'
@@ -402,6 +419,8 @@ def eligible(data,threshold=None,config=None):
 @serialized
 def create_report(run_id,selected,limit,threshold):
     run=db.one('SELECT * FROM runs WHERE id=?',(run_id,))
+    if run and json.loads(run['snapshot']).get('inbound_review_set'):
+        raise IntegrationError('Tập kiểm chứng Jev dùng review bằng chứng riêng; chưa mở Round 2 gọi AI khác.')
     if not run or run['status'] not in ('COMPLETED','PARTIAL') or not current(run):raise IntegrationError('Run chưa hoàn tất hoặc đã cũ; chạy lại trước Round 2.')
     if not selected or limit not in (5,10,20) or len(selected)!=len(set(selected)) or len(selected)>limit:raise IntegrationError('Nhóm chọn trùng hoặc vượt giới hạn 5/10/20.')
     for eid in selected:
@@ -484,6 +503,9 @@ async def worker(sync_only=False):
         if not task:await asyncio.sleep(1);continue
         db.execute("UPDATE tasks SET status='RUNNING',updated=? WHERE id=?",(db.now(),task['id']))
         payload=json.loads(task['payload'])
+        from .online import enabled,actor
+        owner=db.one('SELECT * FROM pilot_task_actors WHERE task_id=?',(task['id'],)) if enabled() else None
+        actor_token=actor.set(owner) if owner else None
         try:
             if task['kind']=='sync':await sync()
             elif task['kind']=='bootstrap':await bootstrap()
@@ -526,6 +548,8 @@ async def worker(sync_only=False):
             db.execute("UPDATE tasks SET status='FAILED',error=?,updated=? WHERE id=?",(err,db.now(),task['id']))
             if payload.get('run_id'):db.execute("UPDATE runs SET status='FAILED',error=?,updated=? WHERE id=?",(err,db.now(),payload['run_id']))
             if payload.get('report_id'):db.execute("UPDATE reports SET status='FAILED',error=? WHERE id=?",(err,payload['report_id']))
+        finally:
+            if actor_token:actor.reset(actor_token)
         await asyncio.sleep(.1)
 
 async def scheduler():

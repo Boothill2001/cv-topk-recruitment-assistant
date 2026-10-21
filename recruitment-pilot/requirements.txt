@@ -13,3 +13,4 @@ psycopg[binary]>=3.2,<4
 alembic>=1.14,<2
 python-multipart>=0.0.20,<1
 orjson>=3.10,<4
+python-dotenv==1.2.1

@@ -28,14 +28,14 @@ def detail(fid):
     if not row:raise KeyError(fid)
     return {**row,'snapshot':json.loads(row['snapshot']),**json.loads(row.pop('data'))}
 
-def blocks(text):
+def blocks(text, deduplicate=True, company_headers=False):
     # Stable paragraph IDs; preserve all input text and conservative subject flags.
     parts=re.split(r'\n\s*\n',text);result=[];section='professional'
     for part in parts:
         if not part.strip():continue
         if re.search(r'^#+\s*(Social|Research Topics|Publications)\b',part,re.I|re.M):section='context_only'
         if re.search(r'^#+\s*(Experience|Education|Skills|Languages|About|Licenses)\b',part,re.I|re.M):section='professional'
-        kind='context_only' if section=='context_only' or re.search(r'\bis a[n]? .*?company\b|\bemployees\s*\(|reposted this|liked this',part,re.I) else 'professional'
+        kind='context_only' if section=='context_only' or re.search(r'\bis a[n]? .*?company\b|\bemployees\s*\(|reposted this|liked this',part,re.I) or (company_headers and re.match(r'\s*(?:Company overview|About (?:the )?company|Giới thiệu công ty|Về công ty)\s*[:：]',part,re.I)) else 'professional'
         while part:
             end=min(3000,len(part))
             if end<len(part):
@@ -44,7 +44,7 @@ def blocks(text):
             piece=part[:end];part=part[end:]
             result.append({'id':'P'+engine.digest(piece)[:16],'text':piece,'kind':kind})
     # Duplicate paragraphs share one immutable evidence reference.
-    unique=list({p['id']:p for p in result}.values())
+    unique=list({p['id']:p for p in result}.values()) if deduplicate else result
     return [{**p,'content_hash':p['id'][1:],'id':f'P{i:03d}'} for i,p in enumerate(unique,1)]
 
 @engine.serialized
@@ -84,6 +84,11 @@ def retry(fid):
     return detail(fid)
 
 async def run(fid):
+    await _run(fid)
+    from .pipeline_history import content
+    content(fid,legacy=False)
+
+async def _run(fid):
     async with exa_search.SEMAPHORE:
         row=detail(fid)
         if row['status']=='COMPLETED':return

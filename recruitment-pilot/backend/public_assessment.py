@@ -102,11 +102,17 @@ def detail(aid):
     row=db.one('SELECT * FROM public_assessments WHERE id=?',(aid,))
     if not row:raise KeyError(aid)
     snap=json.loads(row.pop('snapshot'));data=json.loads(row.pop('data') or '{}')
+    from . import jev
     return {**row,**data,'is_current':current({**row,'snapshot':db.dumps(snap)}),
+            'assessment_engine':snap.get('assessment_engine','CURRENT'),'steps':jev.progress(aid) if snap.get('assessment_engine')=='JEV' else [],
             'source_count':len(snap['sources']),'provider':snap['provider'],'model':snap['model'],
+            'adapter_version':snap.get('adapter_version'),'rubric_version':snap.get('rubric_version'),
             'prompt_version':snap['version'],'source_kind':snap.get('source_kind','public-excerpts-unverified'),'sources':snap['sources'],'input_snapshot':snap}
 
 def budget_preview(snap):
+    if snap.get('assessment_engine')=='JEV':
+        from . import jev
+        return jev.preview(snap)
     budget=ai_assessment.model_budget()
     payload={'public_jd':snap['public_jd'],'criteria':snap['criteria'],'sources':snap['sources']}
     selection=snap.get('content_fetch_id') and uses_selection(snap)
@@ -130,12 +136,14 @@ def budget_preview(snap):
 
 def preflight(snap):
     result=budget_preview(snap)
-    if not result['fits']:
+    if not result.get('technical_fits',result['fits']):
         raise IntegrationError('Nhóm nguồn vượt budget hoặc chưa xác nhận giới hạn: '+db.dumps(result['violations'])+'. Không tự bỏ dữ liệu hoặc chia calls.')
     return result['usage_estimate']['reserved_output_tokens']
 
 @engine.serialized
-def create(job_id,version,search_id,source_urls=None,preview=False,content_fetch_id=None,allow_excerpts=False,*,enqueue=True,snapshot_only=False):
+def create(job_id,version,search_id,source_urls=None,preview=False,content_fetch_id=None,allow_excerpts=False,*,enqueue=True,snapshot_only=False,assessment_engine="CURRENT"):
+    if assessment_engine not in ("CURRENT","JEV"):raise IntegrationError("Engine không hợp lệ.")
+    if assessment_engine=="JEV" and (not content_fetch_id or allow_excerpts):raise IntegrationError("Jev cần text khả dụng; không dùng highlights.")
     c,jp=engine.checked_config(job_id,version)
     if not c['criteria_approved']:raise IntegrationError('Xác nhận yêu cầu của JD trước khi đánh giá nguồn công khai.')
     try:search=exa_search.detail(search_id)
@@ -163,7 +171,8 @@ def create(job_id,version,search_id,source_urls=None,preview=False,content_fetch
         fetch=content_detail(content_fetch_id)
         if fetch['search_id']!=search_id or fetch['status'] not in ('COMPLETED','PARTIAL','FAILED'):
             raise IntegrationError('Nội dung chưa lấy xong hoặc thuộc lượt tìm khác.')
-        fetched={v['url']:v for v in fetch['results']}
+        from .pipeline_history import content_results
+        fetched={v['url']:v for v in content_results(content_fetch_id)}
     for i,s in enumerate(sources,1):
         snippets=list(dict.fromkeys(h for h in s.get('highlights',[]) if h.strip()))
         record={'id':f'PUB{i:03d}','title':s['title'],'url':s['url'],'evidence':{'E'+str(k+1):h for k,h in enumerate(snippets)}}
@@ -177,14 +186,19 @@ def create(job_id,version,search_id,source_urls=None,preview=False,content_fetch
                 item={'paragraphs':blocks('\n\n'.join(snippets)),'revision':engine.digest(db.dumps(snippets)),'warnings':['Chấm đoạn trích theo lựa chọn của khách.'],'provider_source':'highlights'}
             from .content_fetch import blocks
             if item.get('text'):item={**item,'paragraphs':blocks(item['text'])}
-            record.update(**selection_catalog(item['paragraphs'],record['id']),revision=item['revision'],
+            record.update(**(paragraph_catalog if assessment_engine=='JEV' else selection_catalog)(item['paragraphs'],record['id']),revision=item['revision'],
                           warnings=item.get('warnings',[]),provider_source=item.get('provider_source'),fetched_at=item.get('fetched_at'))
+        if assessment_engine=='JEV':record['raw_text']=item.get('text') or '\n\n'.join(p['text'] for p in item['paragraphs'])
         records.append(record)
     snap={'job_revision':jp['revision'],'public_jd':public,'config':config,'criteria':criteria,'sources':records,
           'provider':db.setting('provider','deepseek'),'model':db.setting('model','deepseek-flash'),
           'search_id':search_id,'retrieved_at':search.get('retrieved_at'),'version':VERSION,
           'location_scope':search.get('location_scope',search.get('snapshot',{}).get('location_scope'))}
     if content_fetch_id:snap.update(content_fetch_id=content_fetch_id,version='public-content-5',source_kind='provider-text-unverified',allow_excerpts=allow_excerpts,scorer_version=assessment_scoring.VERSION,prompt_hash=engine.digest(PROMPTS['public_evidence_assessment']),schema_hash=engine.digest(db.dumps(PublicEvidenceBatch.model_json_schema())),parser_version='public-paragraphs-6')
+    if assessment_engine=='JEV':
+        from . import jev
+        snap.update(**jev.settings())
+        snap.update(version=jev.VERSION,parser_version='jev-paragraphs-1',assessment_engine='JEV')
     if not records and not preview:raise IntegrationError('Không có nguồn khả dụng để chấm.')
     if preview:
         result=budget_preview(snap)
@@ -224,6 +238,9 @@ def retry(aid):
     if r['status'] in ('PENDING','RUNNING','COMPLETED'):return detail(aid)
     if not current(r):raise IntegrationError('JD đã đổi; tạo lượt đánh giá theo yêu cầu hiện tại.')
     if r['attempts']>=3:raise IntegrationError('Đã hết 3 lượt thử. Kiểm tra lỗi trước khi đổi input/model.')
+    if json.loads(r['snapshot']).get('assessment_engine')=='JEV':
+        from .jev import prepare_retry
+        prepare_retry(aid)
     with db.LOCK,db.conn() as conn:
         conn.execute("UPDATE public_assessments SET status='PENDING',error=NULL WHERE id=?",(aid,))
         conn.execute('INSERT INTO tasks(kind,payload,status,created,updated) VALUES(?,?,?,?,?)',
@@ -271,6 +288,9 @@ def validate(result,snap):
 async def assess(aid):
     row=db.one('SELECT * FROM public_assessments WHERE id=?',(aid,))
     if not row or row['status']=='COMPLETED':return
+    if json.loads(row['snapshot']).get('assessment_engine')=='JEV':
+        from . import jev
+        return await jev.assess(aid,row)
     try:
         if not current(row):raise IntegrationError('JD đã đổi; cập nhật yêu cầu trước khi đánh giá.')
         snap=json.loads(row['snapshot'])
@@ -294,10 +314,31 @@ async def assess(aid):
         selection=snap.get('content_fetch_id') and uses_selection(snap)
         task='public_evidence_assessment' if selection else 'public_content_assessment' if snap.get('content_fetch_id') else 'public_assessment'
         schema=(PublicEvidenceBatch if selection else PublicJudgeBatch) if snap.get('content_fetch_id') else JudgeBatch
-        result=await engine.ai(task,payload,schema,lambda v:validate_selection(v,snap) if selection else validate(v,snap),
-                              attempts_remaining=3-row['attempts'],on_attempt=attempt,on_usage=used,
-                              max_tokens=preflight(snap),on_rejected=rejected)
+        from . import pipeline
+        rid=pipeline.run('assessment',aid,{'engine':'CURRENT','model':snap['model'],'prompt_version':snap['version']})
+        frozen=pipeline.freeze(payload);input_id=pipeline.artifact('assessment-input',payload=frozen)
+        node=pipeline.begin(rid,'public-criterion-assessment',{'input':input_id},{'model':snap['model'],'prompt':snap['version'],'snapshot':engine.digest(db.dumps(snap))})
+        pipeline.link_texts(node,frozen)
+        cached=pipeline.output(node,'public-judgment')
+        if cached is not None:
+            result=pipeline.thaw(cached);validate(result,snap)
+            usage['artifact_reused']=True
+        else:
+            def rejected_output(value):
+                rejected(value)
+                def invalid(_):raise IntegrationError('Provider output bị validator từ chối.')
+                try:pipeline.capture(rid,'public-rejected:'+str(len(rejections)),{'input':payload},{'prompt':snap['version']},'rejected-judgment',value,invalid)
+                except IntegrationError:pass
+            result=await engine.ai(task,pipeline.thaw(pipeline.ingest(input_id,'assessment-input')),schema,lambda v:validate_selection(v,snap) if selection else validate(v,snap),
+                                  attempts_remaining=3-row['attempts'],on_attempt=attempt,on_usage=used,
+                                  max_tokens=preflight(snap),on_rejected=rejected_output)
+            pipeline.finish(node,'public-judgment',pipeline.freeze(result),lambda v:validate(pipeline.thaw(v),snap),usage=usage)
+            result=pipeline.thaw(pipeline.output(node,'public-judgment'))
         validate(result,snap);items=[];by_id={s['id']:s for s in snap['sources']}
+        pipeline.capture(rid,'public-evidence-selection',{'judgment':result,'sources':snap['sources']},
+          {'parser':snap.get('parser_version'),'prompt':snap['version']},'evidence-selection',
+          {'sources':[{'source_id':i['candidate_id'],'revision':by_id[i['candidate_id']].get('revision'),
+            'criteria':[{'criterion_id':a['criterion_id'],'paragraph_ids':a['evidence_refs']} for a in i['assessments']]} for i in result['items']]})
         for item in result['items']:
             source=by_id[item['candidate_id']]
             for a in item['assessments']:
@@ -309,7 +350,14 @@ async def assess(aid):
             scored=assessment_scoring.score(snap['config'],item,int(item['candidate_id'][3:]))
             items.append({**scored,'url':source['url'],'title':source['title']})
         data={'results':assessment_scoring.ordered(items),'usage':usage,'criteria':snap['criteria'],'rejections':rejections}
+        judgment_id=db.one("SELECT artifact_id FROM artifact_links WHERE attempt_id=? AND direction='OUTPUT' AND role='result'",(node,))['artifact_id']
+        config_id=pipeline.artifact('scoring-config',payload=snap['config'])
+        score_node=pipeline.begin(rid,'public-be-score',{'judgment':judgment_id,'config':config_id},{'scorer':assessment_scoring.VERSION})
+        score_id=pipeline.finish(score_node,'ranked-results',pipeline.freeze(data['results']),lambda v:pipeline.validate_scores(pipeline.thaw(v),snap['config']),usage={'provider_called':False})
+        data['results']=pipeline.thaw(pipeline.ingest(score_id,'ranked-results'))
         db.execute("UPDATE public_assessments SET status='COMPLETED',data=?,error=NULL,updated=? WHERE id=?",(db.dumps(data),db.now(),aid))
     except Exception as e:
+        if 'node' in locals() and db.one('SELECT status FROM node_attempts WHERE id=?',(node,))['status']=='RUNNING':
+            pipeline.finish(node,'failed-judgment',{'error':redact_error(e)},lambda _:None,error={'code':'ASSESSMENT_FAILED','message':redact_error(e)})
         db.execute("UPDATE public_assessments SET status='FAILED',error=?,updated=? WHERE id=?",(redact_error(e),db.now(),aid))
         raise

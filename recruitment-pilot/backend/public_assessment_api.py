@@ -1,3 +1,4 @@
+from typing import Literal
 from fastapi import APIRouter,HTTPException
 from .models import Strict
 from . import public_assessment as service
@@ -8,6 +9,7 @@ class Request(Strict):
     search_id:str
     source_urls:list[str]|None=None
     content_fetch_id:str|None=None
+    assessment_engine:Literal["CURRENT","JEV"]="CURRENT"
     allow_excerpts:bool=False
 @router.get('/public-assessments')
 def history(job_id:str,search_id:str):
@@ -15,7 +17,7 @@ def history(job_id:str,search_id:str):
     return [service.detail(r['id']) for r in db.rows('SELECT id FROM public_assessments WHERE job_id=? AND search_id=? ORDER BY created DESC',(job_id,search_id))]
 @router.post('/public-assessments',status_code=202)
 def create(body:Request):
-    try:return service.create(body.job_id,body.config_version,body.search_id,body.source_urls,content_fetch_id=body.content_fetch_id,allow_excerpts=body.allow_excerpts)
+    try:return service.create(body.job_id,body.config_version,body.search_id,body.source_urls,content_fetch_id=body.content_fetch_id,allow_excerpts=body.allow_excerpts,assessment_engine=body.assessment_engine)
     except KeyError:raise HTTPException(404,'Không tìm thấy lượt tìm nguồn.')
 @router.get('/public-assessments/{aid}')
 def detail(aid:str):
@@ -27,11 +29,11 @@ def retry(aid:str):
     except KeyError:raise HTTPException(404,'Không tìm thấy lượt đánh giá.')
 
 @router.get('/public-assessment-preview')
-def preview(job_id:str,config_version:int,search_id:str,content_fetch_id:str|None=None,allow_excerpts:bool=False):
-    try:return service.create(job_id,config_version,search_id,preview=True,content_fetch_id=content_fetch_id,allow_excerpts=allow_excerpts)
+def preview(job_id:str,config_version:int,search_id:str,content_fetch_id:str|None=None,allow_excerpts:bool=False,assessment_engine:Literal["CURRENT","JEV"]="CURRENT"):
+    try:return service.create(job_id,config_version,search_id,preview=True,content_fetch_id=content_fetch_id,allow_excerpts=allow_excerpts,assessment_engine=assessment_engine)
     except KeyError:raise HTTPException(404,'Không tìm thấy lượt tìm nguồn.')
 
 @router.post('/public-assessment-preview')
 def preview_selection(body:Request):
-    try:return service.create(body.job_id,body.config_version,body.search_id,body.source_urls,preview=True,content_fetch_id=body.content_fetch_id,allow_excerpts=body.allow_excerpts)
+    try:return service.create(body.job_id,body.config_version,body.search_id,body.source_urls,preview=True,content_fetch_id=body.content_fetch_id,allow_excerpts=body.allow_excerpts,assessment_engine=body.assessment_engine)
     except KeyError:raise HTTPException(404,'Không tìm thấy lượt tìm nguồn.')

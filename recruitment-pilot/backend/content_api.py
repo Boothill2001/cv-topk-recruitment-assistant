@@ -58,8 +58,14 @@ async def document(fid:str,source_url:str=Form(...),file:UploadFile=File(...)):
 def export(aid:str):
     value=public_assessment.detail(aid);snap=value['input_snapshot']
     # Allowlisted export, excluding secrets, private job notes and runtime settings.
-    data={k:value.get(k) for k in ('id','status','provider','model','prompt_version','source_kind','results','usage','error')}
-    data['input']={k:snap.get(k) for k in ('public_jd','criteria','sources','job_revision','content_fetch_id','scorer_version')}
+    data={k:value.get(k) for k in ('id','status','provider','model','prompt_version','source_kind','results','usage','error','assessment_engine','steps','source_errors')}
+    data['input']={k:snap.get(k) for k in ('public_jd','criteria','sources','job_revision','content_fetch_id','scorer_version','assessment_engine','adapter_version','rubric_version','model','business_policy')}
+    if snap.get('assessment_engine')=='JEV':
+        from .jev import export_steps
+        data['jev_steps']=export_steps(aid)
+    from .pipeline_history import assessment
+    from .pipeline import export as export_pipeline
+    data['pipeline']=export_pipeline(assessment(aid))
     return Response(json.dumps(data,ensure_ascii=False,indent=2),media_type='application/json',headers={'Content-Disposition':f'attachment; filename="assessment-{aid}.json"'})
 
 class Label(Strict):

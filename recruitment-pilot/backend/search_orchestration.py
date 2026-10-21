@@ -9,11 +9,16 @@ from .prompts import PROMPTS
 PROMPTS['batch_assessment']=ai_assessment.PROMPT
 
 def current(search):
+    saved=search if 'snapshot' in search else db.one('SELECT snapshot FROM searches WHERE id=?',(search['id'],))
+    snap=json.loads(saved['snapshot'])
+    if snap.get('inbound_review_set'):
+        # Explicit review runs intentionally consume frozen source revisions.
+        return bool(db.one('SELECT id FROM inbound_review_sets WHERE id=? AND search_id=?', (snap['inbound_review_set'],search['id'])))
     run=db.one('SELECT * FROM runs WHERE id=?',(search['retrieval_run_id'],))
     return bool(run and engine.current(run))
 
 @engine.serialized
-def create(job_id,version,limit=20,candidate_ids=None):
+def create(job_id,version,limit=20,candidate_ids=None,assessment_engine='CURRENT',preview=False):
     run_id=engine.create_run(job_id,version,candidate_ids=candidate_ids)
     run=db.one('SELECT * FROM runs WHERE id=?',(run_id,));original=json.loads(run['snapshot'])
     rows=[db.unpack(r) for r in db.rows("SELECT * FROM evaluations WHERE run_id=? AND status='COMPLETED'",(run_id,))]
@@ -26,8 +31,19 @@ def create(job_id,version,limit=20,candidate_ids=None):
         if not revision:raise IntegrationError('Thiếu structured profile revision; không đọc lại PDF.')
         group[eid]={**p,'profile':json.loads(revision['data']),'be_rank':rank,'be_evaluation':row['data']}
     snapshot={'job':original['job'],'config':original['config'],'group':group,'pool_size':len(rows)}
+    if assessment_engine=='JEV':
+        from . import internal_jev,jev
+        snapshot['assessment_engine']='JEV';snapshot['internal_adapter_version']=internal_jev.VERSION;snapshot['jev']=internal_jev.build(snapshot)
+        budget=jev.preview(snapshot['jev'])
+        budget['missing_sources']=snapshot['jev']['missing']
+        if preview:return budget
+        if not snapshot['jev']['sources']:raise IntegrationError('Không có CV public đúng revision để gửi Jev.')
+        # Oversize individual CVs remain visible as unassessed; never truncate them.
+        if any(v['code']!='jev_source_budget' for v in budget['violations']):raise IntegrationError(db.dumps(budget['violations']))
     if candidate_ids is not None:snapshot['scope']='single-cv'
     provider=db.setting('provider','deepseek');model=db.setting('model','deepseek-flash')
+    prompt_version=ai_assessment.PROMPT_VERSION
+    if assessment_engine=='JEV':provider='typesafe';model=jev.MODEL;prompt_version=internal_jev.VERSION
     payload,_=ai_assessment.build(snapshot)
     snapshot['assessment_cache_key']=engine.digest(db.dumps({'payload':payload,'provider':provider,'model':model,'prompt_hash':engine.digest(ai_assessment.PROMPT)}))
     fingerprint=engine.digest(db.dumps({'snapshot':snapshot,'retrieval_run_id':run_id,'job_id':job_id,'config_version':version,'provider':provider,'model':model,'candidate_limit':limit,
@@ -42,14 +58,22 @@ def create(job_id,version,limit=20,candidate_ids=None):
     sid=str(uuid.uuid4());now=db.now()
     db.execute('INSERT INTO searches(id,fingerprint,job_id,retrieval_run_id,config_version,candidate_limit,snapshot,status,provider,model,prompt_version,scorer_version,created,updated) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
         (sid,fingerprint,job_id,run_id,version,limit,db.dumps(snapshot),'PENDING',provider,model,
-         ai_assessment.PROMPT_VERSION,assessment_scoring.VERSION,now,now))
+         prompt_version,assessment_scoring.VERSION,now,now))
     engine.enqueue('batch_assessment',{'search_id':sid})
     return sid
 
 async def assess(sid):
     s=db.one('SELECT * FROM searches WHERE id=?',(sid,))
-    if not s or s['status']=='COMPLETED':return
+    if not s or s['status'] in ('COMPLETED','PARTIAL'):return
     try:
+        if json.loads(s['snapshot']).get('inbound_review_set'):
+            from .inbound_review import assess as assess_set
+            await assess_set(s)
+            return
+        if json.loads(s['snapshot']).get('assessment_engine')=='JEV':
+            from .internal_jev import assess as assess_internal
+            await assess_internal(s)
+            return
         if not current(s):raise IntegrationError('Input đã đổi. Mở JD để cập nhật tìm kiếm.')
         if s['prompt_version']!=ai_assessment.PROMPT_VERSION:raise IntegrationError('Prompt đã đổi. Tạo lượt tìm mới; giữ lịch sử cũ.')
         if s['provider']!=db.setting('provider','deepseek') or s['model']!=db.setting('model','deepseek-flash'):
@@ -126,16 +150,28 @@ async def assess(sid):
 def detail(sid):
     s=db.one('SELECT * FROM searches WHERE id=?',(sid,))
     if not s:raise KeyError(sid)
-    snap=json.loads(s.pop('snapshot'));fresh=current(s) and s['prompt_version']==ai_assessment.PROMPT_VERSION and s['scorer_version']==assessment_scoring.VERSION
+    snap=json.loads(s.pop('snapshot'))
+    if snap.get('inbound_review_set'):
+        from .inbound_review import row
+        if not row(snap['inbound_review_set'])['revealed']:
+            from fastapi import HTTPException
+            raise HTTPException(409,'Hoàn tất review mù trước khi mở kết quả AI.')
+    from . import internal_jev
+    is_jev=snap.get('assessment_engine')=='JEV'
+    fresh=current(s) and s['prompt_version']==(internal_jev.VERSION if is_jev else ai_assessment.PROMPT_VERSION) and s['scorer_version']==assessment_scoring.VERSION
     if not fresh and s['status'] not in ('STALE',):s['status']='STALE'
     results=assessment_scoring.ordered([json.loads(r['data']) for r in db.rows('SELECT data FROM search_assessments WHERE search_id=?',(sid,))])
     be=[{'candidate_id':eid,**p['be_evaluation'],'be_rank':p['be_rank']} for eid,p in snap['group'].items()]
-    return {**s,'is_current':fresh,'engine':s['prompt_version'],'input_count':len(snap['group']),
+    report=db.setting('internal_jev_report:'+sid,{}) or db.setting('search_preview:'+sid,{}).get('jev',{})
+    if is_jev:
+        from .jev import progress
+        report={**report,'steps':progress(sid)}
+    return {**s,'is_current':fresh,'engine':s['prompt_version'],'assessment_engine':'JEV' if is_jev else 'CURRENT','jev_report':report,'input_count':len(snap['group']),
             'scope':snap.get('scope','pool'),
             'pool_size':snap['pool_size'],'config':snap['config'],'group':{eid:{'revision':p['revision'],'title':p['profile'].get('title'),'sources':p['sources']} for eid,p in snap['group'].items()},
             'steps':{'retrieval':'COMPLETED','assessment':s['status']},'results':results,
             'be_results':sorted(be,key=lambda r:r['be_rank']),
             'budget':json.loads(s['usage']) if s['usage'] else None,
             'preview':db.setting('search_preview:'+sid,{}).get('items',[]) if s['status']=='RUNNING' and fresh else [],
-            'stream_supported':hasattr(__import__('backend.providers',fromlist=['adapter']).adapter(s['provider']),'generate_stream'),
+            'stream_supported':False if is_jev else hasattr(__import__('backend.providers',fromlist=['adapter']).adapter(s['provider']),'generate_stream'),
             'usage':db.setting('search_usage:'+sid,[])}

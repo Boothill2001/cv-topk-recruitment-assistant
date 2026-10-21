@@ -9,7 +9,8 @@ ENGINES={}
 KEYS={'settings':['key'],'files':['id'],'profiles':['id','kind'],'configs':['job_id'],
       'runs':['id'],'evaluations':['run_id','candidate_id'],'reports':['id'],
       'source_revisions':['file_id','revision'],'config_revisions':['job_id','version'],
-      'sheet_exports':['id'],'candidate_facts':['candidate_id','fact_id'],'profile_revisions':['id','kind','revision']}
+      'sheet_exports':['id'],'candidate_facts':['candidate_id','fact_id'],'profile_revisions':['id','kind','revision'],
+      'search_assessments':['search_id','candidate_id']}
 AUTO={'tasks','calls','feedback','labels','benchmark_runs'}
 
 
@@ -62,6 +63,12 @@ def connect(url):
     finally:raw.close()
 
 def initialize(url,root):
+    from .online import enabled
+    if enabled():
+        with connect(url) as c:
+            row=c.execute('SELECT version_num FROM alembic_version').fetchone()
+        if not row or row['version_num'] not in ('0013_online','0014_inbound_review'):raise RuntimeError('Run release migrations before starting online application')
+        return
     from alembic.config import Config
     from alembic import command
     cfg=Config();cfg.set_main_option('script_location',str(root/'migrations'))

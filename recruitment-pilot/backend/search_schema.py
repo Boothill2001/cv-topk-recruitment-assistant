@@ -7,6 +7,7 @@ from .models import Strict, Evidence
 class SearchRequest(Strict):
     config_version: int = Field(ge=1)
     candidate_limit: int = Field(default=20,ge=1,le=20)
+    assessment_engine: Literal['CURRENT','JEV'] = 'CURRENT'
 
 class CriterionAssessment(Strict):
     criterion_id: str

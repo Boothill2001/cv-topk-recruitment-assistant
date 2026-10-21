@@ -136,3 +136,12 @@ def test_personal_motivation_stays_excluded(text):
     import copy
     config=copy.deepcopy(CONFIG);config['criteria'][0]['name']=text
     with pytest.raises(IntegrationError):engine.validate_config(config,False)
+
+
+def test_jd_names_reuse_legacy_job_identity():
+    assert engine.identity('JD606 B2B Field Sales.pdf','job_public')=='JD606'
+    assert engine.identity('JD595c Private note','job_private')=='JD595c'
+    db.execute("INSERT INTO files(id,entity_id,group_name) VALUES(?,?,?)",('legacy','IT-600','job_public'))
+    assert engine.identity('JD600 IT Senior Data QA.pdf','job_public')=='IT-600'
+    assert engine.identity('JD600 note','job_private')=='IT-600'
+    assert engine.identity('JD600 candidate.pdf','candidate_public') is None

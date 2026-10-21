@@ -16,9 +16,13 @@ ENV_FILE=Path(r'D:\profile\ml-inference-platform-lab\.env.example')
 AI_SEMAPHORE=asyncio.Semaphore(2)
 
 def env_file(provider):
+    from .online import enabled
+    if enabled():return ''
     return db.setting('env_file:'+provider,str(ENV_FILE) if provider=='deepseek' else '')
 
 def key(provider='deepseek',path_override=None):
+    from .online import enabled
+    if enabled():path_override=''
     name=adapter(provider).key_env
     path=path_override if path_override is not None else env_file(provider)
     value=None

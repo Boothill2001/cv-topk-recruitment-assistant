@@ -10,8 +10,12 @@ from .prompts import PROMPTS, VERSION
 SQL = '''CREATE TABLE IF NOT EXISTS scouting_guidance_versions (
  job_id TEXT NOT NULL, version INTEGER NOT NULL, content TEXT NOT NULL,
  created TEXT NOT NULL, PRIMARY KEY(job_id,version));'''
-DEFAULT_VERSION = 'scouting-business-1'
-DEFAULT = ('Tìm hồ sơ có bằng chứng về năng lực phù hợp với JD đã duyệt. '
+DEFAULT_VERSION = 'scouting-business-2'
+DEFAULT = ('Hãy gợi ý các nhóm đối tượng (talent pool) target phù hợp nhất với JD đã duyệt. '
+ 'Với mỗi nhóm, soạn góc tìm kiếm bằng tiếng Anh cho LinkedIn profile hoặc portfolio để đưa vào Exa People. '
+ 'Lồng ghép đầy đủ các MUST-have đã duyệt vào khối yêu cầu công khai chung; backend ghép khối này vào mọi truy vấn. '
+ 'Phân biệt nhóm theo kinh nghiệm thực tế, sản phẩm, ngành hoặc vai trò hiện tại; không tạo nhóm chỉ có một kỹ năng và bỏ các MUST khác. '
+ 'Tìm hồ sơ có bằng chứng về năng lực phù hợp với JD đã duyệt. '
  'Đề xuất các hướng tiếp cận khác nhau theo chuyên môn, ngành và kinh nghiệm thực tế. '
  'Giữ đầy đủ mọi yêu cầu bắt buộc, số năm và quan hệ tất cả/một trong. '
  'Không tự coi các chức danh là tương đương khi chưa có cơ sở. '

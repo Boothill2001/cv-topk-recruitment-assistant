@@ -13,7 +13,8 @@ SEMAPHORE=asyncio.Semaphore(1)
 
 def api_key():
     value=os.environ.get('EXA_API_KEY','').strip()
-    if not value:
+    from .online import enabled
+    if not value and not enabled():
         path=db.RUNTIME/'secrets'/'exa.env'
         if path.is_file():
             match=re.search(r'(?m)^EXA_API_KEY\s*=\s*(.+)$',path.read_text(encoding='utf-8-sig'))

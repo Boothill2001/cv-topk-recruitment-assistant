@@ -11,3 +11,4 @@ client_secret*.json
 *.log
 
 !docs/PUBLIC-PEOPLE-HANDOVER.md
+!docs/INBOUND-REVIEW.md

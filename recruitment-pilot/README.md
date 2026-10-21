@@ -82,3 +82,39 @@ REST API: `POST /api/v1/jobs/{job_id}/cv-assessments` (multipart file/config_ver
 ## Exa web search
 
 Mục **Tìm người trên web** hỗ trợ Web/People, lưu lịch sử và phí Exa trả về. Trong JD → Hướng tìm kiếm, mỗi strategy có truy vấn Exa chỉnh sửa được. Soạn truy vấn cũ theo một batch, lưu/duyệt lại rồi chọn strategy để chạy People. Chỉ truy vấn đã chọn được gửi đi; kết quả là nguồn công khai chưa được đánh giá phù hợp JD. Xem [bản đồ code hiện tại](../docs/START-HERE.md).
+
+## Jev thử nghiệm — hồ sơ web
+
+Trong nhóm nguồn People, chọn **Engine đánh giá → Jev — thử nghiệm** ở phần đánh giá tất cả hoặc chấm nhóm riêng. Engine hiện tại vẫn mặc định. Preview chỉ đọc dữ liệu; nút xác nhận có phí mới enqueue đánh giá. Jev cần text có revision, không tự dùng highlights. TopK và tải link chỉ đọc kết quả lưu.
+
+Backend dùng TypeSafe HTTP API `/v1/systemone`, model ghim `jev-1.13.0`. Mỗi request chỉ có một nguồn: Choice chọn bằng chứng theo cặp tiêu chí–đoạn, rồi Choice đánh giá tiêu chí. Backend lấy quote nguyên văn, kiểm tra nguồn/revision và tính điểm bằng công thức hiện tại. Không có evidence hợp lệ thì UNKNOWN. Confidence/probabilities giữ riêng, không thành điểm phù hợp. Toàn bộ text được giữ; nguồn quá dài bị báo cần xử lý riêng.
+
+Đặt `TYPESAFE_API_KEY` trong môi trường backend, hoặc cấu hình setting `env_file:typesafe` trỏ tới file key ngoài Git (file plain key hoặc `TYPESAFE_API_KEY=...`). Không đặt key trong frontend hay request assessment. Thay nội dung file có hiệu lực ở request tiếp theo nếu không dùng biến môi trường. Lỗi 401/403 dừng, không retry tự động; sau khi sửa key, thao tác retry của người dùng có thể thử lại bước đó, vẫn tối đa ba lần tổng. Lỗi schema/model không fallback.
+
+API preview/create public và assessment-group nhận `assessment_engine: CURRENT | JEV`; thiếu trường giữ hành vi cũ. Engine/model/adapter/rubric nằm trong snapshot và fingerprint. Migration `0011_jev` lưu `jev_steps` và `jev_ledger`; không sửa lịch sử cũ. Export của public assessment có request/response từng bước Jev, không có Authorization header hoặc key. Export vẫn chứa dữ liệu hồ sơ công khai: chỉ chia sẻ cho người được phép.
+
+Ledger dự phòng trước mỗi request và retry, ngân sách kiểm chứng toàn DB tối đa **$0.50**, không tự topup. Giá hiện dùng $0.042/triệu input token, output miễn phí; giá từ usage là **ước tính**, không phải số dư hay hóa đơn provider xác nhận. Phép đếm UTF-8 bảo thủ được ghi `conservative_upper_bound`, không gọi là tokenizer thực. Giới hạn kiểm tra: 64k tổng request và 32k state + câu hỏi dài nhất. Timeout không có usage vẫn giữ khoản dự phòng; không thể khẳng định provider chưa tính phí. Bước đã lưu COMPLETED được dùng lại sau restart; response thất lạc có thể cần retry có phí.
+
+Kiểm chứng ngày 09/10/2026: backup `pilot-20261009T090000Z.dump` đã restore trên DB riêng, migration thử thành công. Frontend build và kiểm thử tự động được thực hiện; kiểm chứng thật Sitecore/Phó Tổng **chưa hoàn tất** vì key được cung cấp trả HTTP 401 tại `/v1/models` và `/v1/systemone`. Chưa có kết quả Jev thật hoặc kết luận Jev tốt hơn engine hiện tại. Cần key hợp lệ để hoàn tất hai lượt đối chiếu đã được cho phép trong $0.50; không tìm/lấy Exa lại hoặc tự duyệt JD.
+# Inbound Jev và outbound Exa
+
+**Cập nhật 19/10/2026:** luồng kiểm chứng mới cho phép chọn trực tiếp 1–20 CV, không dùng retrieval Top20 cũ. Xem [hướng dẫn và giới hạn](docs/INBOUND-REVIEW.md). Các gạch đầu dòng về retrieval dưới đây mô tả luồng tương thích cũ.
+
+
+- **Tìm người trên web:** sửa hướng dẫn nghiệp vụ riêng JD → sinh talent pools → recruiter duyệt MUST và truy vấn cuối → Exa People. Không tự đổi hướng dẫn/config đã lưu. Phần chấm web cũ nằm trong mục thử nghiệm/lịch sử.
+- **Tìm ứng viên trong kho CV:** chọn `Jev — thử nghiệm`, kiểm tra đầu vào/budget rồi xác nhận có phí. Backend retrieval chọn tối đa 20 CV; Jev chỉ nhận text `candidate_public` đúng source revision đã lưu, không private note hoặc PDF đọc lại. Engine cũ vẫn được giữ để tương thích và đối chiếu.
+- Evidence Jev hiển thị file, revision và đoạn nguyên văn. Recruiter có thể ghi đúng/sai/chưa đủ thông tin theo tiêu chí; nhận xét append-only trong `feedback`, không sửa kết quả AI và không tạo nhãn phù hợp ứng viên.
+- Preview `POST /api/v1/jobs/{id}/search-preview` không gọi provider. `assessment_engine` của API tìm mặc định `CURRENT`; chọn `JEV` tạo snapshot/fingerprint riêng. Các bước Jev và ledger dùng storage hiện có, không thêm migration cho inbound.
+- Jev dùng chung ngân sách thử $0.50, không fallback. Nguồn quá dài/thiếu revision được báo chưa chấm. Hoàn tất một phần giữ kết quả hợp lệ; chưa hỗ trợ retry riêng nguồn lỗi inbound trong giao diện này.
+- Đây vẫn là pilot localhost, chưa triển khai quyền truy cập/workspace cho nhiều người hoặc xác nhận chất lượng bằng nhãn khách.
+
+
+## Structured pipeline trace (localhost)
+
+PostgreSQL migration `0012_pipeline` adds immutable artifacts, pipeline runs, node attempts and input/output links. JSONB contains structured outputs; source text is stored once by hash in TEXT and referenced by exact offsets. Validated output is committed with completion status. Ingest rechecks kind, schema and hash; model/prompt/source changes produce a separate fingerprint. Existing tasks and Jev ledger remain the only queue and billing records.
+
+Open **Kiểm tra từ đầu đến cuối — structured output** on a People group or assessment. Expand a child run, node and artifact to inspect input/output, revision, hash, validation, usage and errors. Long source text loads only when that artifact is opened. The JSON export includes upstream runs and is a review/backup artifact, not an external import format. Credentials/header/private-note metadata keys are redacted; original artifact hashes refer to stored data. Exports still contain CV/JD data.
+
+Read APIs: `/api/v1/pipeline-runs/{id}`, `/{id}/artifacts/{artifact_id}`, `/{id}/export`. The compatibility lookup `/by-origin/{kind}/{origin}` supports assessment, content-fetch, assessment-group and people-search. Historical data is projected lazily and labelled legacy; missing provider history is not reconstructed. Opening trace/export does not call Exa, Jev or another LLM. Technical validation is not recruiter approval.
+
+Migration verification is recorded locally in `output/pipeline-migration-verification.json`; backup paths and isolated restored database are listed there. A backend restart is required to expose the newly registered routes on an already running service. No provider calls were made for trace acceptance.

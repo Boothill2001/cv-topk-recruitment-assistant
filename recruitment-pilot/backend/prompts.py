@@ -22,7 +22,7 @@ PROMPTS = {
  Không sửa, bổ sung hoặc hạ priority của criteria. ID S1,S2... không trùng.
  Mỗi strategy mô tả nhóm nền tảng/kinh nghiệm liên quan, nơi đã có thể tích lũy năng lực và cách đối chiếu evidence.
  Không dùng title làm bộ lọc loại người. Không tuyên bố đã tìm web hoặc có kết quả tìm kiếm.
- Đây là các hướng đánh giá pool CV nội bộ; không phải truy vấn đã thực thi ở Exa/Jev.''',
+ Đây là các nhóm đối tượng target theo JD; truy vấn công khai chỉ là bản nháp, chưa thực thi ở Exa.''',
  'evaluation': BASE + '''Đánh giá từng criterion đang bật với đúng một assessment.
  MET đầy đủ, PARTIAL một phần, NOT_MET chỉ khi nguồn nói rõ không đáp ứng; UNKNOWN nếu chưa có evidence.
  MET/PARTIAL/NOT_MET bắt buộc evidence từ hồ sơ ứng viên; không lấy evidence từ JD thay thế.
@@ -98,3 +98,4 @@ PROMPTS['exa_queries']+=' Use concise clauses: target at most 100 characters per
 PROMPTS['strategies']+=' Use concise public MUST clauses and short Exa angles; entire combined MUST block plus angle and location must fit 1500 characters without dropping requirements.'
 for task in ('strategies','exa_queries'):
     PROMPTS[task]+=' exa_query is ONLY the distinct scouting angle, preferably under 120 characters. NEVER repeat the shared public_musts in exa_query: backend prepends every MUST automatically. No location prefix is needed; backend applies the chosen scope.'
+    PROMPTS[task]+=' Propose target talent pools for the approved ideal candidate profile. Each angle should seek a LinkedIn profile or professional portfolio and distinguish relevant product/domain/role experience. Every final query will include ALL enabled public MUST clauses; an angle is not permission to search an unrelated single-skill pool. Preserve specialised years and ALL/ANY semantics before optimising wording. Recruiter must review draft clauses and queries.'
