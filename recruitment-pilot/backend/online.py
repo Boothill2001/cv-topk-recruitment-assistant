@@ -89,6 +89,7 @@ READ = (
  r'/api/v1/content-fetches/[^/]+', r'/api/v1/assessment-groups/[^/]+(?:/(?:results|sources/[^/]+))?',
  r'/api/v1/public-assessments(?:/[^/]+(?:/(?:export|benchmark))?)?', r'/api/v1/public-assessment-preview',
  r'/api/v1/pipeline-runs/.*', r'/api/pilot/feedback',
+ r'/api/v1/pilot-review-sets(?:/[^/]+(?:/(?:sources/[^/]+|results|trace|artifacts/[^/]+|feedback-export|reviews|export))?)?',
 )
 WRITE = (
  r'/api/jobs/upload', r'/api/jobs/[^/]+/(?:prepare|propose|config|criteria/approve|strategies|approve)',
@@ -96,6 +97,7 @@ WRITE = (
  r'/api/v1/web-searches(?:/[^/]+/retry)?', r'/api/v1/people-searches/[^/]+/(?:content-fetches|assessment-groups)',
  r'/api/v1/(?:content-fetches|assessment-groups|public-assessments)/[^/]+/retry',
  r'/api/v1/public-assessments(?:/[^/]+/labels)?', r'/api/v1/public-assessment-preview', r'/api/pilot/feedback',
+ r'/api/v1/pilot-review-sets/[^/]+/(?:labels|reveal)',
 )
 ADMIN = (r'/api/providers(?:/[^/]+/models)?', r'/api/settings/(?:ai|model)', r'/api/connections/check',
          r'/api/prompts', r'/api/calls', r'/api/pilot/settings',r'/api/pilot/audit', r'/api/pilot/uncertain(?:/\d+/resolve)?')

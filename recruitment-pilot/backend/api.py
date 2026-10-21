@@ -31,6 +31,8 @@ app=FastAPI(title='Recruitment pilot',lifespan=lifespan)
 app.include_router(online.router)
 from .inbound_review import router as inbound_router
 app.include_router(inbound_router)
+from .pilot_review import router as pilot_review_router
+app.include_router(pilot_review_router)
 
 @app.middleware('http')
 async def local_only(request:Request,call_next):

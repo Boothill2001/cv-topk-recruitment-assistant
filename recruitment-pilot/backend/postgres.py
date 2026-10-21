@@ -67,7 +67,7 @@ def initialize(url,root):
     if enabled():
         with connect(url) as c:
             row=c.execute('SELECT version_num FROM alembic_version').fetchone()
-        if not row or row['version_num'] not in ('0013_online','0014_inbound_review'):raise RuntimeError('Run release migrations before starting online application')
+        if not row or row['version_num'] != '0015_pilot_review':raise RuntimeError('Run release migrations before starting online application')
         return
     from alembic.config import Config
     from alembic import command

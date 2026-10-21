@@ -141,6 +141,8 @@ def init():
         c.executescript(ONLINE_SQL)
         from .inbound_review import SQL as INBOUND_SQL
         c.executescript(INBOUND_SQL)
+        from .pilot_review import SQL as REVIEW_SQL
+        c.executescript(REVIEW_SQL)
         c.execute("UPDATE content_fetches SET status='INTERRUPTED' WHERE status='RUNNING'")
         c.execute("UPDATE public_assessments SET status='INTERRUPTED',error='Dịch vụ dừng giữa đánh giá; thử lại.' WHERE status='RUNNING'")
         c.execute("UPDATE web_searches SET status='INTERRUPTED',error='Dịch vụ dừng giữa lượt tìm web; kiểm tra lịch sử rồi thử lại.' WHERE status='RUNNING'")

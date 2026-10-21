@@ -18,6 +18,10 @@ remove that privilege. Botkeep support confirmed on 2026-10-14 that split users
 and application-specific private networking/allowlists are not currently offered.
 Do not represent this setup as least privilege or private-only networking.
 Keep the support request for future split roles. No CV pool or private notes.
+The explicitly approved exception is one published Jev review packet containing
+three selected, redacted CVs and their already-completed results. It is stored in
+protected artifacts, not `files`/`profiles` or public assets. This is not online
+inbound assessment: the provider/queue entry points remain disabled.
 
 ## Environment and startup
 
@@ -55,3 +59,23 @@ host. Restore on an isolated DB and compare counts/hashes. Use a maintenance
 window and keep the preceding release and migration-compatible backup. Do not
 blindly replay interrupted provider requests. Do not hand over the HTTPS URL as
 ready until full browser acceptance and restore have passed.
+
+## Published Jev review
+
+Migration `0015_pilot_review` is required before this release starts. Export only
+the selected completed local set with `python -m backend.pilot_review_transfer
+export-local --set <id> --output <private-path>`. Inspect redaction spans and
+validate the packet; CV text never belongs in Git or the release ZIP.
+
+Transfer the packet separately to a private runtime path. In a maintenance
+process with the existing database environment and `PILOT_RELEASE`, run
+`python -m backend.pilot_review_transfer import-online --bundle <private-path>
+--sha256 <verified-sha256>`. The transaction is idempotent and never enqueues work
+or charges the historical usage again. The printed `/?review_set=<id>` link opens
+the review after login. Labels and reveal state are independent for Tri and Dat.
+The trace contains original attempt metadata; original provider payloads are not
+copied, and the redacted review artifacts have their own hashes.
+
+Rollback to the previous release requires its corresponding database backup;
+the previous startup schema gate does not accept migration 0015. Preserve any
+new human review labels before restoring an older database.
